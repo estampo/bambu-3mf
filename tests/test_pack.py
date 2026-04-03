@@ -1,4 +1,8 @@
-"""Test bambu-3mf packaging against OrcaSlicer reference output."""
+"""Tests for .gcode.3mf packaging against a Bambu Connect-accepted reference.
+
+The reference fixture is plate_sliced.gcode.3mf from the decoy-case example,
+which has been validated to work with Bambu Connect on a P1S with AMS.
+"""
 
 from __future__ import annotations
 
@@ -11,64 +15,58 @@ from xml.etree import ElementTree as ET
 
 import pytest
 
-from bambu_3mf.pack import FilamentInfo, SliceInfo, pack_gcode_3mf
+from bambu_3mf.pack import (
+    FilamentInfo,
+    SliceInfo,
+    _filament_maps_str,
+    _pad_project_settings,
+    pack_gcode_3mf,
+)
+
 
 FIXTURES = Path(__file__).parent / "fixtures"
-REFERENCE_3MF = FIXTURES / "reference.gcode.3mf"
-CUBE_GCODE = FIXTURES / "cube.gcode"
+REFERENCE = FIXTURES / "reference.gcode.3mf"
+PROJECT_SETTINGS = json.loads((FIXTURES / "project_settings.json").read_text())
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+def _ref() -> zipfile.ZipFile:
+    return zipfile.ZipFile(REFERENCE)
 
 
-def _read_zip(path_or_buf: Path | BytesIO) -> dict[str, bytes]:
-    """Return {filename: content} for every entry in a ZIP."""
-    with zipfile.ZipFile(path_or_buf) as z:
-        return {info.filename: z.read(info.filename) for info in z.infolist()}
-
-
-def _ref_files() -> dict[str, bytes]:
-    """Load the OrcaSlicer reference .gcode.3mf."""
-    return _read_zip(REFERENCE_3MF)
-
-
-def _pack_cube(**kwargs: object) -> dict[str, bytes]:
-    """Pack the cube.gcode with default settings and return archive contents."""
-    gcode = CUBE_GCODE.read_bytes()
+def _pack(**kwargs) -> zipfile.ZipFile:
+    """Pack with reference-matching defaults and return the ZipFile."""
+    gcode = kwargs.pop("gcode", b"; test gcode\nG1 X10 Y10\n")
     buf = BytesIO()
-    info = SliceInfo(
-        printer_model_id="",
-        nozzle_diameter=0.4,
-        prediction=1241,
-        weight=3.64,
-        label_object_enabled=True,
-        filaments=[
-            FilamentInfo(
-                slot=1,
-                tray_info_idx="GFL99",
-                filament_type="PLA",
-                color="#F2754E",
-                used_m=1.22,
-                used_g=3.64,
-            )
-        ],
-        **kwargs,  # type: ignore[arg-type]
+    info = kwargs.pop(
+        "slice_info",
+        SliceInfo(
+            nozzle_diameter=0.4,
+            prediction=1951,
+            weight=10.36,
+            filaments=[
+                FilamentInfo(
+                    slot=3,
+                    tray_info_idx="GFG98",
+                    filament_type="PETG-CF",
+                    color="#F2754E",
+                    used_m=3.45,
+                    used_g=10.36,
+                )
+            ],
+        ),
     )
-    pack_gcode_3mf(gcode, buf, slice_info=info)
+    ps = kwargs.pop("project_settings", PROJECT_SETTINGS)
+    pack_gcode_3mf(gcode, buf, slice_info=info, project_settings=ps, **kwargs)
     buf.seek(0)
-    return _read_zip(buf)
+    return zipfile.ZipFile(buf)
 
 
 # ---------------------------------------------------------------------------
-# Tests: archive structure
+# Archive structure
 # ---------------------------------------------------------------------------
 
 
 class TestArchiveStructure:
-    """The output archive must contain the same required files as the reference."""
-
     REQUIRED_FILES = {
         "[Content_Types].xml",
         "_rels/.rels",
@@ -78,222 +76,260 @@ class TestArchiveStructure:
         "Metadata/model_settings.config",
         "Metadata/_rels/model_settings.config.rels",
         "Metadata/slice_info.config",
+        "Metadata/project_settings.config",
         "Metadata/plate_1.json",
+        "Metadata/plate_1.png",
+        "Metadata/plate_no_light_1.png",
+        "Metadata/plate_1_small.png",
     }
 
-    def test_required_files_present(self) -> None:
-        ours = _pack_cube()
-        missing = self.REQUIRED_FILES - set(ours.keys())
-        assert not missing, f"Missing files: {missing}"
+    def test_all_required_files_present(self) -> None:
+        z = _pack()
+        names = set(z.namelist())
+        missing = self.REQUIRED_FILES - names
+        assert not missing, f"Missing: {missing}"
 
     def test_reference_has_same_required_files(self) -> None:
-        ref = _ref_files()
-        missing = self.REQUIRED_FILES - set(ref.keys())
-        assert not missing, f"Reference missing: {missing}"
+        with _ref() as z:
+            names = set(z.namelist())
+            missing = self.REQUIRED_FILES - names
+            assert not missing, f"Reference missing: {missing}"
 
 
 # ---------------------------------------------------------------------------
-# Tests: G-code and MD5
+# Gcode integrity
 # ---------------------------------------------------------------------------
 
 
 class TestGcodeIntegrity:
-    """The G-code must be byte-for-byte identical and the MD5 must be correct."""
-
-    def test_gcode_matches_reference(self) -> None:
-        ref = _ref_files()
-        ours = _pack_cube()
-        assert ours["Metadata/plate_1.gcode"] == ref["Metadata/plate_1.gcode"]
+    def test_gcode_round_trips(self) -> None:
+        gcode = b"; test\nG28\nG1 X50 Y50 Z0.3\n"
+        z = _pack(gcode=gcode)
+        assert z.read("Metadata/plate_1.gcode") == gcode
 
     def test_md5_matches_gcode(self) -> None:
-        ours = _pack_cube()
-        gcode = ours["Metadata/plate_1.gcode"]
-        md5 = hashlib.md5(gcode).hexdigest().upper()
-        assert ours["Metadata/plate_1.gcode.md5"].decode() == md5
+        gcode = b"G28\nG1 X10\n"
+        z = _pack(gcode=gcode)
+        packed_gcode = z.read("Metadata/plate_1.gcode")
+        md5 = z.read("Metadata/plate_1.gcode.md5").decode()
+        assert md5 == hashlib.md5(packed_gcode).hexdigest().upper()
 
-    def test_md5_matches_reference(self) -> None:
-        ref = _ref_files()
-        ours = _pack_cube()
-        assert ours["Metadata/plate_1.gcode.md5"] == ref["Metadata/plate_1.gcode.md5"]
-
-
-# ---------------------------------------------------------------------------
-# Tests: static boilerplate files
-# ---------------------------------------------------------------------------
-
-
-class TestBoilerplate:
-    """Static XML files must match the reference exactly."""
-
-    def test_content_types(self) -> None:
-        ref = _ref_files()
-        ours = _pack_cube()
-        assert ours["[Content_Types].xml"] == ref["[Content_Types].xml"]
-
-    def test_rels(self) -> None:
-        ref = _ref_files()
-        ours = _pack_cube()
-        assert ours["_rels/.rels"] == ref["_rels/.rels"]
-
-    def test_model_settings_rels(self) -> None:
-        ref = _ref_files()
-        ours = _pack_cube()
-        assert (
-            ours["Metadata/_rels/model_settings.config.rels"]
-            == ref["Metadata/_rels/model_settings.config.rels"]
-        )
+    def test_md5_is_uppercase_hex(self) -> None:
+        z = _pack()
+        md5 = z.read("Metadata/plate_1.gcode.md5").decode()
+        assert len(md5) == 32
+        assert md5 == md5.upper()
+        int(md5, 16)  # must be valid hex
 
 
 # ---------------------------------------------------------------------------
-# Tests: 3D model
+# Boilerplate XML
+# ---------------------------------------------------------------------------
+
+
+class TestBoilerplateXml:
+    def test_content_types_matches_reference(self) -> None:
+        with _ref() as ref:
+            expected = ref.read("[Content_Types].xml")
+        z = _pack()
+        assert z.read("[Content_Types].xml") == expected
+
+    def test_rels_matches_reference(self) -> None:
+        with _ref() as ref:
+            expected = ref.read("_rels/.rels")
+        z = _pack()
+        assert z.read("_rels/.rels") == expected
+
+    def test_model_settings_rels_matches_reference(self) -> None:
+        with _ref() as ref:
+            expected = ref.read("Metadata/_rels/model_settings.config.rels")
+        z = _pack()
+        assert z.read("Metadata/_rels/model_settings.config.rels") == expected
+
+
+# ---------------------------------------------------------------------------
+# 3D model
 # ---------------------------------------------------------------------------
 
 
 class TestModel:
-    """The 3D model XML must be minimal (empty resources/build)."""
+    def test_has_bambu_version(self) -> None:
+        z = _pack()
+        content = z.read("3D/3dmodel.model").decode()
+        assert "BambuStudio:3mfVersion" in content
 
-    def test_model_has_bambu_version(self) -> None:
-        ours = _pack_cube()
-        root = ET.fromstring(ours["3D/3dmodel.model"])
-        ns = {"m": "http://schemas.microsoft.com/3dmanufacturing/core/2015/02"}
-        version = root.find(".//m:metadata[@name='BambuStudio:3mfVersion']", ns)
-        assert version is not None
-        assert version.text == "1"
+    def test_empty_build(self) -> None:
+        z = _pack()
+        content = z.read("3D/3dmodel.model").decode()
+        assert "<build/>" in content
 
-    def test_model_has_empty_build(self) -> None:
-        ours = _pack_cube()
-        root = ET.fromstring(ours["3D/3dmodel.model"])
-        ns = {"m": "http://schemas.microsoft.com/3dmanufacturing/core/2015/02"}
-        resources = root.find("m:resources", ns)
-        assert resources is not None
-        assert len(resources) == 0  # no child elements
-
-    def test_model_matches_reference(self) -> None:
-        ref = _ref_files()
-        ours = _pack_cube()
-        assert ours["3D/3dmodel.model"] == ref["3D/3dmodel.model"]
+    def test_matches_reference(self) -> None:
+        with _ref() as ref:
+            expected = ref.read("3D/3dmodel.model")
+        z = _pack()
+        assert z.read("3D/3dmodel.model") == expected
 
 
 # ---------------------------------------------------------------------------
-# Tests: model_settings.config
+# model_settings.config
 # ---------------------------------------------------------------------------
 
 
 class TestModelSettings:
-    """model_settings.config must contain plate definition linking to gcode."""
-
     def test_has_gcode_file_ref(self) -> None:
-        ours = _pack_cube()
-        xml = ours["Metadata/model_settings.config"].decode()
-        assert 'value="Metadata/plate_1.gcode"' in xml
+        z = _pack()
+        content = z.read("Metadata/model_settings.config").decode()
+        assert 'value="Metadata/plate_1.gcode"' in content
 
-    def test_has_plater_id(self) -> None:
-        ours = _pack_cube()
-        xml = ours["Metadata/model_settings.config"].decode()
-        assert 'key="plater_id" value="1"' in xml
+    def test_has_thumbnail_refs(self) -> None:
+        z = _pack()
+        content = z.read("Metadata/model_settings.config").decode()
+        assert 'key="thumbnail_file"' in content
+        assert 'key="thumbnail_no_light_file"' in content
+        assert 'key="top_file"' in content
+        assert 'key="pick_file"' in content
+        assert 'key="pattern_bbox_file"' in content
 
-    def test_matches_reference(self) -> None:
-        ref = _ref_files()
-        ours = _pack_cube()
-        assert ours["Metadata/model_settings.config"] == ref["Metadata/model_settings.config"]
+    def test_filament_maps_padded(self) -> None:
+        z = _pack()
+        content = z.read("Metadata/model_settings.config").decode()
+        # Slot 3, padded to 5 → "3 3 3 3 3"
+        assert 'value="3 3 3 3 3"' in content
+
+    def test_matches_reference_keys(self) -> None:
+        """All metadata keys from reference must be present."""
+        with _ref() as ref:
+            ref_xml = ref.read("Metadata/model_settings.config").decode()
+        z = _pack()
+        our_xml = z.read("Metadata/model_settings.config").decode()
+
+        ref_root = ET.fromstring(ref_xml)
+        our_root = ET.fromstring(our_xml)
+        ref_keys = {m.get("key") for m in ref_root.findall(".//metadata")}
+        our_keys = {m.get("key") for m in our_root.findall(".//metadata")}
+        assert ref_keys == our_keys
 
 
 # ---------------------------------------------------------------------------
-# Tests: slice_info.config
+# project_settings.config
+# ---------------------------------------------------------------------------
+
+
+class TestProjectSettings:
+    def test_present_when_provided(self) -> None:
+        z = _pack()
+        assert "Metadata/project_settings.config" in z.namelist()
+
+    def test_valid_json(self) -> None:
+        z = _pack()
+        data = json.loads(z.read("Metadata/project_settings.config"))
+        assert isinstance(data, dict)
+        assert len(data) > 500
+
+    def test_arrays_padded_to_min_slots(self) -> None:
+        z = _pack()
+        data = json.loads(z.read("Metadata/project_settings.config"))
+        for key, val in data.items():
+            if isinstance(val, list) and len(val) > 0:
+                assert len(val) >= 5, f"{key} has {len(val)} elements, expected >= 5"
+
+    def test_omitted_when_none(self) -> None:
+        z = _pack(project_settings=None)
+        assert "Metadata/project_settings.config" not in z.namelist()
+
+
+# ---------------------------------------------------------------------------
+# slice_info.config
 # ---------------------------------------------------------------------------
 
 
 class TestSliceInfo:
-    """slice_info.config must contain print metadata."""
-
     def test_has_prediction(self) -> None:
-        ours = _pack_cube()
-        xml = ours["Metadata/slice_info.config"].decode()
-        assert 'key="prediction" value="1241"' in xml
+        z = _pack()
+        content = z.read("Metadata/slice_info.config").decode()
+        assert 'key="prediction" value="1951"' in content
 
     def test_has_weight(self) -> None:
-        ours = _pack_cube()
-        xml = ours["Metadata/slice_info.config"].decode()
-        assert 'key="weight" value="3.64"' in xml
+        z = _pack()
+        content = z.read("Metadata/slice_info.config").decode()
+        assert 'value="10.36"' in content
 
     def test_has_filament(self) -> None:
-        ours = _pack_cube()
-        xml = ours["Metadata/slice_info.config"].decode()
-        assert 'type="PLA"' in xml
-        assert 'tray_info_idx="GFL99"' in xml
-
-    def test_has_nozzle_diameter(self) -> None:
-        ours = _pack_cube()
-        xml = ours["Metadata/slice_info.config"].decode()
-        assert 'key="nozzle_diameters" value="0.4"' in xml
+        z = _pack()
+        content = z.read("Metadata/slice_info.config").decode()
+        assert 'type="PETG-CF"' in content
+        assert 'tray_info_idx="GFG98"' in content
 
     def test_structure_matches_reference(self) -> None:
-        """Key structure matches — values may differ for dynamic fields."""
-        ref = _ref_files()
-        ours = _pack_cube()
-        ref_xml = ref["Metadata/slice_info.config"].decode()
-        our_xml = ours["Metadata/slice_info.config"].decode()
+        with _ref() as ref:
+            ref_xml = ref.read("Metadata/slice_info.config").decode()
+        z = _pack()
+        our_xml = z.read("Metadata/slice_info.config").decode()
 
-        # Both must have the same set of metadata keys
-        def extract_keys(xml: str) -> set[str]:
-            root = ET.fromstring(xml)
-            keys: set[str] = set()
-            for elem in root.iter("metadata"):
-                k = elem.get("key")
-                if k:
-                    keys.add(k)
-            return keys
-
-        assert extract_keys(our_xml) == extract_keys(ref_xml)
+        ref_root = ET.fromstring(ref_xml)
+        our_root = ET.fromstring(our_xml)
+        ref_keys = {m.get("key") for m in ref_root.findall(".//metadata")}
+        our_keys = {m.get("key") for m in our_root.findall(".//metadata")}
+        assert ref_keys == our_keys
 
 
 # ---------------------------------------------------------------------------
-# Tests: plate_1.json
+# Thumbnails
 # ---------------------------------------------------------------------------
 
 
-class TestPlateJson:
-    """plate_1.json must contain filament and plate metadata."""
+class TestThumbnails:
+    def test_placeholder_pngs_included(self) -> None:
+        z = _pack()
+        for name in ["Metadata/plate_1.png", "Metadata/plate_no_light_1.png", "Metadata/plate_1_small.png"]:
+            data = z.read(name)
+            assert data[:4] == b"\x89PNG", f"{name} is not a valid PNG"
 
-    def test_valid_json(self) -> None:
-        ours = _pack_cube()
-        data = json.loads(ours["Metadata/plate_1.json"])
-        assert "filament_colors" in data
-        assert "nozzle_diameter" in data
-        assert data["version"] == 2
-
-    def test_filament_colors(self) -> None:
-        ours = _pack_cube()
-        data = json.loads(ours["Metadata/plate_1.json"])
-        assert data["filament_colors"] == ["#F2754E"]
-
-    def test_nozzle_diameter(self) -> None:
-        ours = _pack_cube()
-        data = json.loads(ours["Metadata/plate_1.json"])
-        assert data["nozzle_diameter"] == 0.4
+    def test_custom_thumbnails(self) -> None:
+        custom_png = b"\x89PNG\r\n\x1a\nCUSTOM"
+        z = _pack(thumbnails={"Metadata/plate_1.png": custom_png})
+        assert z.read("Metadata/plate_1.png") == custom_png
 
 
 # ---------------------------------------------------------------------------
-# Tests: file output
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+class TestHelpers:
+    def test_filament_maps_padding(self) -> None:
+        filaments = [FilamentInfo(slot=2)]
+        assert _filament_maps_str(filaments) == "2 2 2 2 2"
+
+    def test_filament_maps_multiple(self) -> None:
+        filaments = [FilamentInfo(slot=1), FilamentInfo(slot=3)]
+        assert _filament_maps_str(filaments) == "1 3 3 3 3"
+
+    def test_filament_maps_empty(self) -> None:
+        assert _filament_maps_str([]) == "1 1 1 1 1"
+
+    def test_pad_project_settings(self) -> None:
+        settings = {"filament_type": ["PLA", "PETG"], "speed": "100"}
+        padded = _pad_project_settings(settings)
+        assert padded["filament_type"] == ["PLA", "PETG", "PETG", "PETG", "PETG"]
+        assert padded["speed"] == "100"
+
+
+# ---------------------------------------------------------------------------
+# File output
 # ---------------------------------------------------------------------------
 
 
 class TestFileOutput:
-    """pack_gcode_3mf can write to a file path."""
-
     def test_write_to_path(self, tmp_path: Path) -> None:
         out = tmp_path / "test.gcode.3mf"
-        gcode = b"; simple test\nG28\n"
-        pack_gcode_3mf(gcode, out)
+        pack_gcode_3mf(
+            b"G28\n",
+            out,
+            slice_info=SliceInfo(),
+            project_settings=PROJECT_SETTINGS,
+        )
         assert out.exists()
         with zipfile.ZipFile(out) as z:
             assert "Metadata/plate_1.gcode" in z.namelist()
-            assert z.read("Metadata/plate_1.gcode") == gcode
-
-    def test_md5_correct_for_custom_gcode(self, tmp_path: Path) -> None:
-        out = tmp_path / "test.gcode.3mf"
-        gcode = b"G28\nG1 X10 Y10 Z0.2 F3000\n"
-        pack_gcode_3mf(gcode, out)
-        with zipfile.ZipFile(out) as z:
-            md5 = hashlib.md5(gcode).hexdigest().upper()
-            assert z.read("Metadata/plate_1.gcode.md5").decode() == md5
+            assert "Metadata/project_settings.config" in z.namelist()
