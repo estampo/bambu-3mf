@@ -13,20 +13,24 @@ def gcode_thumbnail(
 ) -> bytes:
     """Render a top-down toolpath preview from G-code as a PNG.
 
-    Parses G0/G1 moves, draws extrusion moves as colored lines on a dark
-    background with a bed outline. Returns PNG bytes.
+    Parses G0/G1 extrusion moves from the print body (skipping startup
+    G-code) and draws them on a dark background. Returns PNG bytes.
     """
     from PIL import Image, ImageDraw
 
     if isinstance(gcode, bytes):
         gcode = gcode.decode(errors="replace")
 
-    # Parse G0/G1 moves
-    moves: list[tuple[float, float, float, float, bool]] = []  # x0,y0,x1,y1,extrude
+    # Only render moves after the first Z_HEIGHT marker (skip startup/purge).
+    # BBL slicers emit "; Z_HEIGHT: <n>" at each layer.
+    z_height_idx = gcode.find("; Z_HEIGHT:")
+    if z_height_idx >= 0:
+        gcode = gcode[z_height_idx:]
+
+    # Parse G0/G1 extrusion moves only
+    moves: list[tuple[float, float, float, float]] = []  # x0,y0,x1,y1
     x = y = 0.0
-    _g_re = re.compile(
-        r"^G[01]\s", re.IGNORECASE
-    )
+    _g_re = re.compile(r"^G[01]\s", re.IGNORECASE)
     _x_re = re.compile(r"X([-\d.]+)", re.IGNORECASE)
     _y_re = re.compile(r"Y([-\d.]+)", re.IGNORECASE)
     _e_re = re.compile(r"E([-\d.]+)", re.IGNORECASE)
@@ -41,53 +45,49 @@ def gcode_thumbnail(
         nx = float(xm.group(1)) if xm else x
         ny = float(ym.group(1)) if ym else y
         extrude = em is not None and float(em.group(1)) > 0
-        if (nx != x or ny != y):
-            moves.append((x, y, nx, ny, extrude))
+        if extrude and (nx != x or ny != y):
+            moves.append((x, y, nx, ny))
         x, y = nx, ny
 
     if not moves:
         return _placeholder(width, height)
 
-    # Compute bounding box
+    # Bounding box of print moves
     all_x = [m[0] for m in moves] + [m[2] for m in moves]
     all_y = [m[1] for m in moves] + [m[3] for m in moves]
     xmin, xmax = min(all_x), max(all_x)
     ymin, ymax = min(all_y), max(all_y)
 
-    # Scale to fit with margin
-    margin = 20
-    draw_w = width - 2 * margin
-    draw_h = height - 2 * margin
-    extent_x = max(xmax - xmin, 1)
-    extent_y = max(ymax - ymin, 1)
-    scale = min(draw_w / extent_x, draw_h / extent_y)
-    ox = margin + (draw_w - extent_x * scale) / 2
-    oy = margin + (draw_h - extent_y * scale) / 2
+    # Add padding around the print (15% of extent, minimum 2mm)
+    pad_x = max((xmax - xmin) * 0.15, 2.0)
+    pad_y = max((ymax - ymin) * 0.15, 2.0)
+    xmin -= pad_x
+    xmax += pad_x
+    ymin -= pad_y
+    ymax += pad_y
+
+    # Scale to fit image
+    extent_x = max(xmax - xmin, 0.1)
+    extent_y = max(ymax - ymin, 0.1)
+    scale = min(width / extent_x, height / extent_y)
+    ox = (width - extent_x * scale) / 2
+    oy = (height - extent_y * scale) / 2
 
     def px(mx: float, my: float) -> tuple[int, int]:
         return (int(ox + (mx - xmin) * scale), int(oy + (ymax - my) * scale))
 
-    # Draw
+    # Colours
     bg = (25, 25, 30)
-    bed_color = (55, 58, 65)
-    travel_color = (60, 60, 70)
     extrude_color = (0, 180, 160)  # teal
 
     img = Image.new("RGB", (width, height), bg)
     draw = ImageDraw.Draw(img)
 
-    # Bed outline (P1S: 256x256, centered at 128,128)
-    bed_tl = px(0, 256)
-    bed_br = px(256, 0)
-    if bed_tl[0] < bed_br[0] and bed_tl[1] < bed_br[1]:
-        draw.rectangle([bed_tl, bed_br], fill=bed_color, outline=(75, 78, 85))
-
-    # Draw moves
-    for x0, y0, x1, y1, ext in moves:
+    # Draw extrusion moves
+    for x0, y0, x1, y1 in moves:
         p0 = px(x0, y0)
         p1 = px(x1, y1)
-        color = extrude_color if ext else travel_color
-        draw.line([p0, p1], fill=color, width=1)
+        draw.line([p0, p1], fill=extrude_color, width=1)
 
     buf = io.BytesIO()
     img.save(buf, format="PNG")

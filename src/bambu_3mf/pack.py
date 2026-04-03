@@ -401,8 +401,21 @@ def pack_gcode_3mf(
             z.writestr("Metadata/slice_info.config", _slice_info_xml(slice_info))
             z.writestr("_rels/.rels", RELS_XML)
 
-            # Thumbnails
+            # Thumbnails — generate from G-code toolpath if not provided
             thumb_map = thumbnails or {}
+            if not thumb_map:
+                try:
+                    from bambu_3mf.thumbnail import gcode_thumbnail
+                    gcode_str = gcode if isinstance(gcode, str) else gcode.decode(errors="replace")
+                    main_png = gcode_thumbnail(gcode_str, 256, 256)
+                    small_png = gcode_thumbnail(gcode_str, 128, 128)
+                    thumb_map = {
+                        "Metadata/plate_1.png": main_png,
+                        "Metadata/plate_no_light_1.png": main_png,
+                        "Metadata/plate_1_small.png": small_png,
+                    }
+                except Exception:
+                    pass  # fall back to placeholder
             for path in [
                 "Metadata/plate_1.png",
                 "Metadata/plate_no_light_1.png",
