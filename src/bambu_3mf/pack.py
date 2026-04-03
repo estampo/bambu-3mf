@@ -17,6 +17,21 @@ from pathlib import Path
 # All per-filament arrays in project_settings must be padded to this length.
 MIN_SLOTS = 5
 
+# Keys absent from OrcaSlicer CLI --min-save output but required by Bambu Connect.
+_BC_REQUIRED_KEYS: dict[str, object] = {
+    "bbl_use_printhost": "1",
+    "default_bed_type": "",
+    "filament_retract_lift_above": ["0"],
+    "filament_retract_lift_below": ["0"],
+    "filament_retract_lift_enforce": [""],
+    "host_type": "octoprint",
+    "pellet_flow_coefficient": "0",
+    "pellet_modded_printer": "0",
+    "printhost_authorization_type": "key",
+    "printhost_ssl_ignore_revoke": "0",
+    "thumbnails_format": "BTT_TFT",
+}
+
 # ---------------------------------------------------------------------------
 # Static boilerplate (identical for every .gcode.3mf)
 # ---------------------------------------------------------------------------
@@ -286,9 +301,19 @@ def _plate_json(info: SliceInfo, filaments: list[FilamentInfo]) -> str:
     return json.dumps(data, separators=(",", ":"))
 
 
-def _pad_project_settings(settings: dict[str, object], min_slots: int = MIN_SLOTS) -> dict[str, object]:
-    """Pad short per-filament arrays in project_settings to min_slots."""
+def fixup_project_settings(settings: dict[str, object], min_slots: int = MIN_SLOTS) -> dict[str, object]:
+    """Make project_settings Bambu Connect-ready.
+
+    1. Add required keys that OrcaSlicer CLI ``--min-save`` omits.
+    2. Pad short per-filament arrays to *min_slots* (P1S = 5).
+
+    Called automatically by :func:`pack_gcode_3mf`. Also useful standalone
+    for patching existing 3MF archives.
+    """
     result = dict(settings)
+    for key, default in _BC_REQUIRED_KEYS.items():
+        if key not in result:
+            result[key] = default
     for key, val in result.items():
         if isinstance(val, list) and 0 < len(val) < min_slots:
             while len(val) < min_slots:
@@ -318,7 +343,8 @@ def pack_gcode_3mf(
         slice_info: Print metadata (time, weight, filaments). Defaults are
             provided if omitted.
         project_settings: Full slicer settings dict for
-            project_settings.config. Passed through as-is (no padding).
+            project_settings.config. Automatically fixed up for Bambu
+            Connect compatibility (missing keys added, arrays padded).
             Use :func:`build_project_settings` from ``bambu_3mf.settings``
             to generate from templates.
         thumbnails: Optional dict mapping archive paths to PNG bytes, e.g.
@@ -356,9 +382,10 @@ def pack_gcode_3mf(
             )
 
             if project_settings is not None:
+                fixed_ps = fixup_project_settings(project_settings)
                 z.writestr(
                     "Metadata/project_settings.config",
-                    json.dumps(project_settings, indent=4) + "\n",
+                    json.dumps(fixed_ps, indent=4) + "\n",
                 )
 
             z.writestr("Metadata/plate_1.gcode.md5", md5)
