@@ -1,0 +1,65 @@
+{
+    "_comment": "All inputs required to pack a .gcode.3mf beyond the raw G-code bytes",
+
+    "slice_info": {
+        "printer_model_id": "",
+        "nozzle_diameter": 0.4,
+        "timelapse_type": 0,
+        "prediction": 1951,
+        "weight": 10.36,
+        "outside": false,
+        "support_used": false,
+        "label_object_enabled": true,
+        "filaments": [
+            {
+                "slot": 3,
+                "tray_info_idx": "GFG98",
+                "filament_type": "PETG-CF",
+                "color": "#F2754E",
+                "used_m": 3.45,
+                "used_g": 10.36
+            }
+        ],
+        "objects": [
+            {"identify_id": 8, "name": "", "skipped": false},
+            {"identify_id": 12, "name": "", "skipped": false}
+        ],
+        "warnings": [
+            {"msg": "bed_temperature_too_high_than_filament", "level": 1, "error_code": "1000C001"}
+        ]
+    },
+
+    "plate_data": {
+        "_comment": "Raw plate_1.json — bbox data comes from slicer, passthrough",
+        "bbox_all": [111.15, 100.65, 144.85, 155.35],
+        "bbox_objects": [
+            {"area": 774.94, "bbox": [111.15, 129.0, 144.85, 155.35], "id": 39, "layer_height": 0.2, "name": ""},
+            {"area": 252.86, "bbox": [111.15, 100.65, 144.85, 127.0], "id": 40, "layer_height": 0.2, "name": ""}
+        ],
+        "bed_type": "textured_plate",
+        "filament_colors": ["#F2754E"],
+        "filament_ids": [2],
+        "first_extruder": 2,
+        "is_seq_print": false,
+        "nozzle_diameter": 0.4,
+        "version": 2
+    },
+
+    "project_settings": "_comment: 544-key dict from OrcaSlicer profile chain, too large to inline. Passed as separate JSON file.",
+
+    "thumbnails": {
+        "plate_1.png": "_comment: 256x256 plate preview PNG",
+        "plate_no_light_1.png": "_comment: same image without lighting effects",
+        "plate_1_small.png": "_comment: 128x128 small thumbnail"
+    },
+
+    "ams_mapping": {
+        "_comment": "Only needed for cloud_print(), not for packing",
+        "trays": [
+            {"phys_slot": 0, "type": "PLA", "color": "FFFFFF", "tray_info_idx": "GFL99"},
+            {"phys_slot": 1, "type": "ASA", "color": "BCBCBC", "tray_info_idx": "GFB98"},
+            {"phys_slot": 2, "type": "PETG-CF", "color": "2850E0", "tray_info_idx": "GFG98"},
+            {"phys_slot": 3, "type": "PLA", "color": "161616", "tray_info_idx": "GFL99"}
+        ]
+    }
+}
