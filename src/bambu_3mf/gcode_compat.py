@@ -70,7 +70,8 @@ def _translate_cura(text: str) -> str:
     CuraEngine emits:
     * ``;LAYER_COUNT:N`` — total layers
     * ``;LAYER:N`` — 0-based layer index
-    * ``;TIME:N`` — total print time in seconds
+    * ``;TIME:N`` — total print time in seconds (often placeholder 6666)
+    * ``;TIME_ELAPSED:N`` — cumulative time at each layer (accurate)
     * ``;Filament used: X.XXm`` — filament usage
     * ``;MAXZ:N`` — maximum Z height
     """
@@ -79,19 +80,50 @@ def _translate_cura(text: str) -> str:
         return text
     total = int(m_count.group(1))
 
-    m_time = re.search(r";TIME:(\d+)", text)
-    time_secs = int(m_time.group(1)) if m_time else 0
+    # Get total time: prefer last TIME_ELAPSED (accurate) over ;TIME: (often 6666 placeholder)
+    elapsed_matches = re.findall(r";TIME_ELAPSED:([\d.]+)", text)
+    if elapsed_matches:
+        time_secs = int(float(elapsed_matches[-1]))
+    else:
+        m_time = re.search(r";TIME:(\d+)", text)
+        time_secs = int(m_time.group(1)) if m_time else 0
+
+    # Build per-layer elapsed time map for accurate M73 R values
+    layer_elapsed: dict[int, float] = {}
+    for m in re.finditer(r";LAYER:(\d+)", text):
+        layer_n = int(m.group(1))
+        # Find the next TIME_ELAPSED after this layer marker
+        rest = text[m.end():m.end() + 5000]
+        te = re.search(r";TIME_ELAPSED:([\d.]+)", rest)
+        if te:
+            layer_elapsed[layer_n] = float(te.group(1))
 
     m_maxz = re.search(r";MAXZ:([\d.]+)", text)
-    max_z = m_maxz.group(1) if m_maxz else "0"
+    max_z = m_maxz.group(1) if m_maxz else None
+    # CuraEngine sometimes emits garbage MAXZ (e.g. -2.14748e+06). Compute
+    # from layer count × layer height instead.
+    if max_z is None or float(max_z) <= 0:
+        m_lh = re.search(r";Layer height:\s*([\d.]+)", text)
+        layer_height = float(m_lh.group(1)) if m_lh else 0.2
+        max_z = f"{total * layer_height:.1f}"
 
     header = _build_header_block(total, time_secs, max_z)
+    # Initial M73 so firmware shows correct remaining time from the start
+    # (before the first ;LAYER:0 marker). Without this, printer shows <1m.
+    total_minutes = round(time_secs / 60)
+    header += f"M73 P0 R{total_minutes}\n"
     text = header + text
 
     def _layer_sub(match: re.Match[str]) -> str:
         n = int(match.group(1))
         pct = round(n * 100 / total) if total > 0 else 0
-        remaining = round(time_secs * (total - n) / total / 60) if total > 0 else 0
+        # Use per-layer elapsed if available, otherwise linear interpolation
+        if n in layer_elapsed:
+            remaining = max(0, round((time_secs - layer_elapsed[n]) / 60))
+        elif total > 0:
+            remaining = round(time_secs * (total - n) / total / 60)
+        else:
+            remaining = 0
         return (
             f"; layer num/total_layer_count: {n + 1}/{total}\n"
             f"M73 P{pct} R{remaining}\n"
@@ -132,6 +164,8 @@ def _translate_prusa(text: str) -> str:
         max_z = m_maxz.group(1)
 
     header = _build_header_block(total, time_secs, max_z)
+    total_minutes = round(time_secs / 60)
+    header += f"M73 P0 R{total_minutes}\n"
     text = header + text
 
     # Replace each ;LAYER_CHANGE with BBL markers
