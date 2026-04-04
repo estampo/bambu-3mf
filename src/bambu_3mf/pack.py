@@ -356,7 +356,14 @@ def pack_gcode_3mf(
     if slice_info is None:
         slice_info = SliceInfo()
 
-    # MD5 of raw gcode (uppercase hex, as firmware expects)
+    # Translate non-BBL G-code (CuraEngine, PrusaSlicer, etc.) to
+    # Bambu-firmware-compatible format with HEADER_BLOCK, M73 L, M991.
+    from bambu_3mf.gcode_compat import is_bbl_gcode, translate_to_bbl
+
+    if not is_bbl_gcode(gcode):
+        gcode = translate_to_bbl(gcode)
+
+    # MD5 of final gcode (uppercase hex, as firmware expects)
     md5 = hashlib.md5(gcode).hexdigest().upper()
 
     filament_maps = _filament_maps_str()
