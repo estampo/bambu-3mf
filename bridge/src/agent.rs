@@ -13,6 +13,7 @@ use crate::callbacks::{self, CallbackState};
 use crate::ffi;
 
 /// Credentials loaded from `credentials.toml` or a token JSON file.
+#[derive(Debug)]
 pub struct Credentials {
     pub token: String,
     pub refresh_token: String,
@@ -387,12 +388,127 @@ impl BambuAgent {
         self.agent
     }
 
+    /// Create a null agent for testing (no FFI calls allowed).
+    /// # Safety
+    /// Only for tests — calling any FFI method on this agent will crash.
+    #[cfg(test)]
+    pub unsafe fn test_null() -> Self {
+        Self {
+            agent: std::ptr::null_mut(),
+            state: Box::new(CallbackState::new()),
+        }
+    }
+
     /// Poll an atomic bool flag until it becomes true or timeout elapses.
     fn poll_flag(&self, flag: &std::sync::atomic::AtomicBool, timeout: Duration) {
         let start = std::time::Instant::now();
         while start.elapsed() < timeout && !flag.load(Ordering::SeqCst) {
             std::thread::sleep(Duration::from_millis(50));
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn credentials_from_token_json_valid() {
+        let json = r#"{"token":"abc123","refreshToken":"ref456","uid":"42","name":"Test","email":"t@t.com"}"#;
+        let c = Credentials::from_token_json(json).unwrap();
+        assert_eq!(c.token, "abc123");
+        assert_eq!(c.refresh_token, "ref456");
+        assert_eq!(c.uid, "42");
+        assert_eq!(c.name, "Test");
+        assert_eq!(c.email, "t@t.com");
+    }
+
+    #[test]
+    fn credentials_from_token_json_missing_token() {
+        let json = r#"{"uid":"42"}"#;
+        let err = Credentials::from_token_json(json).unwrap_err();
+        assert!(err.contains("token"), "expected token error, got: {err}");
+    }
+
+    #[test]
+    fn credentials_from_token_json_invalid() {
+        let err = Credentials::from_token_json("not json").unwrap_err();
+        assert!(err.contains("invalid JSON"));
+    }
+
+    #[test]
+    fn credentials_from_toml_valid() {
+        let dir = std::env::temp_dir().join("bambu_test_creds");
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("credentials.toml");
+        std::fs::write(
+            &path,
+            r#"
+[cloud]
+token = "tok123"
+refresh_token = "ref789"
+uid = "99"
+email = "user@example.com"
+"#,
+        )
+        .unwrap();
+
+        let c = Credentials::from_toml(&path).unwrap();
+        assert_eq!(c.token, "tok123");
+        assert_eq!(c.refresh_token, "ref789");
+        assert_eq!(c.uid, "99");
+        assert_eq!(c.email, "user@example.com");
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn credentials_from_toml_no_cloud_section() {
+        let dir = std::env::temp_dir().join("bambu_test_creds2");
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("bad.toml");
+        std::fs::write(&path, "[other]\nfoo = \"bar\"\n").unwrap();
+
+        let err = Credentials::from_toml(&path).unwrap_err();
+        assert!(err.contains("cloud"), "expected cloud error, got: {err}");
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn credentials_to_user_json_structure() {
+        let c = Credentials {
+            token: "t".into(),
+            refresh_token: "r".into(),
+            uid: "u".into(),
+            name: "n".into(),
+            email: "e".into(),
+        };
+        let json = c.to_user_json();
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["data"]["token"], "t");
+        assert_eq!(v["data"]["refresh_token"], "r");
+        assert_eq!(v["data"]["user"]["uid"], "u");
+        assert_eq!(v["data"]["user"]["name"], "n");
+        assert_eq!(v["data"]["user"]["account"], "e");
+    }
+
+    #[test]
+    fn credentials_to_user_json_empty_refresh_falls_back_to_token() {
+        let c = Credentials {
+            token: "mytoken".into(),
+            refresh_token: "".into(),
+            uid: "".into(),
+            name: "".into(),
+            email: "".into(),
+        };
+        let json = c.to_user_json();
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["data"]["refresh_token"], "mytoken");
     }
 }
 

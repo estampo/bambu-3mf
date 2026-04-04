@@ -1,13 +1,15 @@
 //! bambu-bridge — Rust CLI for Bambu Lab printer status and monitoring.
 //!
-//! Phase 1: `status` and `watch` subcommands, replacing the C++ bridge
-//! for read-only operations.
+//! Phase 1: `status` and `watch` subcommands (one-shot / stdin-driven)
+//! Phase 2: `daemon` subcommand — axum HTTP API on localhost
 
 mod agent;
 mod callbacks;
 mod ffi;
+mod server;
 
 use std::io::{self, BufRead, Write};
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::process;
 use std::time::Duration;
@@ -15,30 +17,6 @@ use std::time::Duration;
 use clap::{Parser, Subcommand};
 
 use agent::{BambuAgent, Credentials};
-
-/// Saved original stdout fd, used to restore after suppressing library noise.
-static mut SAVED_STDOUT: i32 = -1;
-
-/// Suppress stdout to hide library noise (e.g. "use_count = 4").
-/// Logs (tracing) go to stderr and are unaffected.
-fn suppress_stdout() {
-    unsafe {
-        SAVED_STDOUT = libc::dup(1);
-        let devnull = libc::open(b"/dev/null\0".as_ptr() as *const _, libc::O_WRONLY);
-        if devnull >= 0 {
-            libc::dup2(devnull, 1);
-            libc::close(devnull);
-        }
-    }
-}
-
-/// Fast exit that skips atexit handlers, avoiding .so MQTT thread cleanup hangs.
-fn fast_exit(code: i32) -> ! {
-    use std::io::Write;
-    let _ = io::stdout().flush();
-    let _ = io::stderr().flush();
-    unsafe { libc::_exit(code) }
-}
 
 #[derive(Parser)]
 #[command(name = "bambu-bridge", about = "Bambu Lab printer bridge")]
@@ -75,10 +53,53 @@ enum Command {
         /// Path to token JSON file or credentials TOML
         credentials: PathBuf,
     },
+    /// Start HTTP API daemon on localhost
+    Daemon {
+        /// Path to token JSON file or credentials TOML
+        credentials: PathBuf,
+        /// Port to listen on
+        #[arg(short, long, default_value = "8765")]
+        port: u16,
+        /// Bind address
+        #[arg(long, default_value = "127.0.0.1")]
+        bind: String,
+    },
+}
+
+/// Saved original stdout fd, used to restore after suppressing library noise.
+static mut SAVED_STDOUT: i32 = -1;
+
+/// Suppress stdout to hide library noise (e.g. "use_count = 4").
+/// Logs (tracing) go to stderr and are unaffected.
+fn suppress_stdout() {
+    unsafe {
+        SAVED_STDOUT = libc::dup(1);
+        let devnull = libc::open(b"/dev/null\0".as_ptr() as *const _, libc::O_WRONLY);
+        if devnull >= 0 {
+            libc::dup2(devnull, 1);
+            libc::close(devnull);
+        }
+    }
+}
+
+/// Restore stdout after suppression.
+fn restore_stdout() {
+    unsafe {
+        if SAVED_STDOUT >= 0 {
+            libc::dup2(SAVED_STDOUT, 1);
+        }
+    }
+}
+
+/// Fast exit that skips atexit handlers, avoiding .so MQTT thread cleanup hangs.
+fn fast_exit(code: i32) -> ! {
+    use std::io::Write;
+    let _ = io::stdout().flush();
+    let _ = io::stderr().flush();
+    unsafe { libc::_exit(code) }
 }
 
 fn load_credentials(path: &PathBuf) -> Credentials {
-    // Try TOML first (has [cloud] section), fall back to raw JSON
     if let Some(ext) = path.extension() {
         if ext == "toml" {
             match Credentials::from_toml(path) {
@@ -133,9 +154,7 @@ fn cmd_status(agent: &BambuAgent, device_id: &str) {
     }
 
     let messages = agent.drain_messages();
-
-    // Restore stdout (was suppressed to hide library noise like "use_count = 4")
-    unsafe { libc::dup2(SAVED_STDOUT, 1) };
+    restore_stdout();
 
     match best_message(&messages) {
         Some(msg) => {
@@ -152,7 +171,6 @@ fn cmd_watch(agent: &BambuAgent, device_id: &str) {
     let dev_c = std::ffi::CString::new(device_id).unwrap();
     let module = std::ffi::CString::new("device").unwrap();
 
-    // Subscribe once
     unsafe {
         ffi::bambu_shim_set_user_selected_machine(agent.agent_ptr(), dev_c.as_ptr());
     }
@@ -164,7 +182,6 @@ fn cmd_watch(agent: &BambuAgent, device_id: &str) {
         ffi::bambu_shim_start_subscribe(agent.agent_ptr(), module.as_ptr());
     }
 
-    // Wait for subscription
     let start = std::time::Instant::now();
     while start.elapsed() < Duration::from_secs(3)
         && !agent
@@ -175,12 +192,10 @@ fn cmd_watch(agent: &BambuAgent, device_id: &str) {
         std::thread::sleep(Duration::from_millis(100));
     }
 
-    // Restore stdout and signal readiness
-    unsafe { libc::dup2(SAVED_STDOUT, 1) };
+    restore_stdout();
     println!("{{\"ready\":true}}");
     io::stdout().flush().unwrap();
 
-    // Read commands from stdin
     let stdin = io::stdin();
     for line in stdin.lock().lines() {
         let line = match line {
@@ -196,14 +211,11 @@ fn cmd_watch(agent: &BambuAgent, device_id: &str) {
         }
 
         if line == "status" {
-            // Drain any stale messages
             agent.drain_messages();
 
-            // Send pushall
             let pushall = r#"{"pushing":{"sequence_id":"0","command":"pushall","version":1,"push_target":1}}"#;
             agent.send_message(device_id, pushall);
 
-            // Wait for full status
             let start = std::time::Instant::now();
             let timeout = Duration::from_secs(10);
             loop {
@@ -237,11 +249,11 @@ fn cmd_watch(agent: &BambuAgent, device_id: &str) {
     }
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let cli = Cli::parse();
 
-    // Set up tracing
-    let level = if cli.verbose { "debug" } else { "warn" };
+    let level = if cli.verbose { "debug" } else { "info" };
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -259,8 +271,6 @@ fn main() {
             let creds = load_credentials(credentials);
             let agent = init_agent(&cli.lib_path, &creds);
             cmd_status(&agent, device_id);
-            // Fast exit — _exit() skips atexit handlers, avoids .so MQTT
-            // thread cleanup hangs (same as C++ bridge's fast_exit).
             fast_exit(0);
         }
         Command::Watch {
@@ -272,6 +282,39 @@ fn main() {
             let agent = init_agent(&cli.lib_path, &creds);
             cmd_watch(&agent, device_id);
             fast_exit(0);
+        }
+        Command::Daemon {
+            credentials,
+            port,
+            bind,
+        } => {
+            suppress_stdout();
+            let creds = load_credentials(credentials);
+            let agent = init_agent(&cli.lib_path, &creds);
+            restore_stdout();
+
+            let state = server::AppState::new(agent);
+            let app = server::router(state);
+
+            let addr: SocketAddr = format!("{bind}:{port}")
+                .parse()
+                .unwrap_or_else(|e| {
+                    eprintln!("error: invalid bind address: {e}");
+                    process::exit(1);
+                });
+
+            tracing::info!("listening on http://{addr}");
+
+            let listener = tokio::net::TcpListener::bind(addr).await.unwrap_or_else(|e| {
+                eprintln!("error: cannot bind {addr}: {e}");
+                process::exit(1);
+            });
+            axum::serve(listener, app)
+                .await
+                .unwrap_or_else(|e| {
+                    eprintln!("error: server failed: {e}");
+                    process::exit(1);
+                });
         }
     }
 }

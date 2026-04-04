@@ -6,13 +6,19 @@ description = "Rust bridge daemon for Bambu Lab printers via libbambu_networking
 license = "MIT"
 
 [dependencies]
+axum = "0.7"
 clap = { version = "4", features = ["derive", "env"] }
+libc = "0.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+tokio = { version = "1", features = ["full"] }
 toml = "0.8"
+tower-http = { version = "0.6", features = ["cors", "trace"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-libc = "0.2"
 
 [build-dependencies]
 cc = "1"
+
+[dev-dependencies]
+axum-test = "16"

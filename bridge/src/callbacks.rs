@@ -102,3 +102,105 @@ pub extern "C" fn on_subscribe_failure(topic: *const c_char, _ctx: *mut c_void) 
     let t = unsafe { cstr_to_str(topic) };
     tracing::warn!(topic = t, "subscribe_failure callback");
 }
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::CString;
+
+    #[test]
+    fn callback_state_new_defaults() {
+        let s = CallbackState::new();
+        assert!(!s.server_connected.load(Ordering::SeqCst));
+        assert!(!s.user_logged_in.load(Ordering::SeqCst));
+        assert!(!s.printer_subscribed.load(Ordering::SeqCst));
+        assert!(s.drain_messages().is_empty());
+    }
+
+    #[test]
+    fn drain_messages_empties_buffer() {
+        let s = CallbackState::new();
+        {
+            let mut msgs = s.messages.lock().unwrap();
+            msgs.push(MqttMessage {
+                dev_id: "dev1".into(),
+                payload: "hello".into(),
+            });
+            msgs.push(MqttMessage {
+                dev_id: "dev2".into(),
+                payload: "world".into(),
+            });
+        }
+        let drained = s.drain_messages();
+        assert_eq!(drained.len(), 2);
+        assert_eq!(drained[0].dev_id, "dev1");
+        assert_eq!(drained[1].payload, "world");
+
+        // Buffer should be empty now
+        assert!(s.drain_messages().is_empty());
+    }
+
+    #[test]
+    fn on_server_connected_sets_flag() {
+        let s = Box::new(CallbackState::new());
+        let ctx = &*s as *const CallbackState as *mut c_void;
+        on_server_connected(0, 0, ctx);
+        assert!(s.server_connected.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn on_server_connected_nonzero_rc_does_not_set() {
+        let s = Box::new(CallbackState::new());
+        let ctx = &*s as *const CallbackState as *mut c_void;
+        on_server_connected(1, 0, ctx);
+        assert!(!s.server_connected.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn on_message_stores_payload() {
+        let s = Box::new(CallbackState::new());
+        let ctx = &*s as *const CallbackState as *mut c_void;
+        let dev = CString::new("DEVICE1").unwrap();
+        let msg = CString::new(r#"{"gcode_state":"RUNNING"}"#).unwrap();
+        on_message(dev.as_ptr(), msg.as_ptr(), ctx);
+
+        let msgs = s.drain_messages();
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0].dev_id, "DEVICE1");
+        assert!(msgs[0].payload.contains("gcode_state"));
+    }
+
+    #[test]
+    fn on_message_ignores_empty() {
+        let s = Box::new(CallbackState::new());
+        let ctx = &*s as *const CallbackState as *mut c_void;
+        let dev = CString::new("DEV").unwrap();
+        let empty = CString::new("").unwrap();
+        let braces = CString::new("{}").unwrap();
+        on_message(dev.as_ptr(), empty.as_ptr(), ctx);
+        on_message(dev.as_ptr(), braces.as_ptr(), ctx);
+
+        assert!(s.drain_messages().is_empty());
+    }
+
+    #[test]
+    fn on_user_login_sets_flag() {
+        let s = Box::new(CallbackState::new());
+        let ctx = &*s as *const CallbackState as *mut c_void;
+        on_user_login(0, 1, ctx);
+        assert!(s.user_logged_in.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn on_printer_connected_sets_flag() {
+        let s = Box::new(CallbackState::new());
+        let ctx = &*s as *const CallbackState as *mut c_void;
+        let topic = CString::new("01P00A451601106").unwrap();
+        on_printer_connected(topic.as_ptr(), ctx);
+        assert!(s.printer_subscribed.load(Ordering::SeqCst));
+    }
+}
