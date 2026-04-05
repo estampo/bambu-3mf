@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "bambu-3mf"
+name = "bambox"
 version = "0.1.0"
 description = "Package plain G-code into Bambu Lab .gcode.3mf files"
 readme = "README.md"
@@ -29,7 +29,7 @@ dev = [
 ]
 
 [project.scripts]
-bambu-3mf = "bambu_3mf.cli:main"
+bambox = "bambox.cli:main"
 
 [tool.ruff]
 line-length = 100
@@ -45,7 +45,7 @@ disable_error_code = ["import-untyped"]
 directory = "changes"
 filename = "CHANGELOG.md"
 title_format = "## {version} — {project_date}"
-issue_format = "[#{issue}](https://github.com/estampo/bambu-3mf/pull/{issue})"
+issue_format = "[#{issue}](https://github.com/estampo/bambox/pull/{issue})"
 
   [[tool.towncrier.type]]
   directory = "feature"

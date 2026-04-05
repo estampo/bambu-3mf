@@ -1,10 +1,10 @@
-# Contributing to bambu-3mf
+# Contributing to bambox
 
 ## Development setup
 
 ```bash
-git clone https://github.com/estampo/bambu-3mf.git
-cd bambu-3mf
+git clone https://github.com/estampo/bambox.git
+cd bambox
 uv sync --extra dev
 ```
 
@@ -15,7 +15,7 @@ Run all four checks locally:
 ```bash
 uv run ruff check src tests        # lint
 uv run ruff format --check src tests  # formatting
-uv run mypy src/bambu_3mf          # type check
+uv run mypy src/bambox          # type check
 uv run pytest                      # tests
 ```
 

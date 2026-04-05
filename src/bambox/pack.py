@@ -354,7 +354,7 @@ def pack_gcode_3mf(
         project_settings: Full slicer settings dict for
             project_settings.config. Automatically fixed up for Bambu
             Connect compatibility (missing keys added, arrays padded).
-            Use :func:`build_project_settings` from ``bambu_3mf.settings``
+            Use :func:`build_project_settings` from ``bambox.settings``
             to generate from templates.
         thumbnails: Optional dict mapping archive paths to PNG bytes, e.g.
             ``{"Metadata/plate_1.png": png_bytes}``. If not provided,
@@ -367,7 +367,7 @@ def pack_gcode_3mf(
 
     # Translate non-BBL G-code (CuraEngine, PrusaSlicer, etc.) to
     # Bambu-firmware-compatible format with HEADER_BLOCK, M73 L, M991.
-    from bambu_3mf.gcode_compat import is_bbl_gcode, translate_to_bbl
+    from bambox.gcode_compat import is_bbl_gcode, translate_to_bbl
 
     if not is_bbl_gcode(gcode):
         gcode = translate_to_bbl(gcode)
@@ -422,7 +422,7 @@ def pack_gcode_3mf(
             thumb_map = thumbnails or {}
             if not thumb_map:
                 try:
-                    from bambu_3mf.thumbnail import gcode_thumbnail
+                    from bambox.thumbnail import gcode_thumbnail
 
                     gcode_str = gcode if isinstance(gcode, str) else gcode.decode(errors="replace")
                     main_png = gcode_thumbnail(gcode_str, 256, 256)

@@ -14,7 +14,7 @@ The obvious approach is to pass through the settings blob from the slicer (OrcaS
 
 ## Decision
 
-bambu-3mf generates the full 544-key settings blob from a layered profile system:
+bambox generates the full 544-key settings blob from a layered profile system:
 
 1. **Machine base profile** (`profiles/base_p1s.json`) — all 544 keys with sensible defaults for the target printer. This is the single source of truth for the key set.
 2. **Filament type profiles** (`profiles/filament_pla.json`, etc.) — per-filament-type overrides for keys that vary by material (temperatures, speeds, retraction).

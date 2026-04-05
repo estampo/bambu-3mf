@@ -1,6 +1,6 @@
 """Generate project_settings.config from machine base + filament profiles.
 
-This module makes bambu-3mf slicer-agnostic: instead of requiring a 544-key
+This module makes bambox slicer-agnostic: instead of requiring a 544-key
 blob from OrcaSlicer, it generates the settings from a small machine base
 profile and per-filament-type data files.
 

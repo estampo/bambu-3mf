@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 
-from bambu_3mf.templates import orca_to_jinja2, render_template
+from bambox.templates import orca_to_jinja2, render_template
 
 
 # ---------------------------------------------------------------------------
@@ -209,13 +209,13 @@ class TestTemplateFiles:
     """Verify all expected template files exist."""
 
     def test_p1s_start_exists(self) -> None:
-        tmpl_dir = Path(__file__).parent.parent / "src/bambu_3mf/gcode_templates"
+        tmpl_dir = Path(__file__).parent.parent / "src/bambox/gcode_templates"
         assert (tmpl_dir / "p1s_start.gcode.j2").exists()
 
     def test_p1s_end_exists(self) -> None:
-        tmpl_dir = Path(__file__).parent.parent / "src/bambu_3mf/gcode_templates"
+        tmpl_dir = Path(__file__).parent.parent / "src/bambox/gcode_templates"
         assert (tmpl_dir / "p1s_end.gcode.j2").exists()
 
     def test_p1s_toolchange_exists(self) -> None:
-        tmpl_dir = Path(__file__).parent.parent / "src/bambu_3mf/gcode_templates"
+        tmpl_dir = Path(__file__).parent.parent / "src/bambox/gcode_templates"
         assert (tmpl_dir / "p1s_toolchange.gcode.j2").exists()

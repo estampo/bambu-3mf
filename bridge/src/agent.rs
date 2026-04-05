@@ -35,7 +35,7 @@ pub struct PrintRequest {
 }
 
 fn default_project_name() -> String {
-    "bambu-3mf".into()
+    "bambox".into()
 }
 fn default_true() -> bool {
     true
@@ -670,7 +670,7 @@ email = "user@example.com"
         let req: PrintRequest = serde_json::from_str(json).unwrap();
         assert_eq!(req.device_id, "DEV1");
         assert_eq!(req.filename, "test.3mf");
-        assert_eq!(req.project_name, "bambu-3mf");
+        assert_eq!(req.project_name, "bambox");
         assert!(req.bed_leveling);
         assert!(req.flow_cali);
         assert!(req.vibration_cali);

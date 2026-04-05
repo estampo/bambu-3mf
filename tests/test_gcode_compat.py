@@ -1,6 +1,6 @@
 """Tests for gcode_compat — generic slicer G-code → BBL firmware translation."""
 
-from bambu_3mf.gcode_compat import (
+from bambox.gcode_compat import (
     _build_header_block,
     _parse_prusa_time,
     is_bbl_gcode,
@@ -196,7 +196,7 @@ def test_pack_auto_translates_cura(tmp_path):
     """pack_gcode_3mf automatically translates CuraEngine G-code."""
     import zipfile
 
-    from bambu_3mf import pack_gcode_3mf
+    from bambox import pack_gcode_3mf
 
     out = tmp_path / "test.gcode.3mf"
     pack_gcode_3mf(CURA_GCODE, out)
@@ -213,7 +213,7 @@ def test_pack_no_double_translate(tmp_path):
     """pack_gcode_3mf does not double-translate BBL G-code."""
     import zipfile
 
-    from bambu_3mf import pack_gcode_3mf
+    from bambox import pack_gcode_3mf
 
     bbl_gcode = b"; HEADER_BLOCK_START\n; total layer number: 2\n; HEADER_BLOCK_END\nG28\nG1 Z0.2\n"
     out = tmp_path / "test.gcode.3mf"
