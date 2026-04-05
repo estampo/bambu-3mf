@@ -14,7 +14,7 @@ from pathlib import Path
 from xml.etree import ElementTree as ET
 
 
-from bambu_3mf.pack import (
+from bambox.pack import (
     FilamentInfo,
     SliceInfo,
     _filament_maps_str,

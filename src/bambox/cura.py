@@ -1,4 +1,4 @@
-"""CuraEngine slicer backend for bambu-3mf.
+"""CuraEngine slicer backend for bambox.
 
 Slices STL files using CuraEngine via Docker, with BBL-specific start/end
 G-code injected from the Jinja2 templates. Produces plain G-code that can
@@ -72,7 +72,7 @@ def _render_bbl_gcode(profile: CuraProfile) -> tuple[str, str]:
 
     Returns (start_gcode, end_gcode) as rendered strings.
     """
-    from bambu_3mf.templates import render_template
+    from bambox.templates import render_template
 
     # Build a context dict that matches what the templates expect
     bed_temp = profile.material_bed_temperature
@@ -338,7 +338,7 @@ def slice_stl(
         shutil.copy2(stl_path, tmp / stl_path.name)
 
         # Build
-        tag = "bambu-3mf-cura-tmp"
+        tag = "bambox-cura-tmp"
         build_cmd = ["docker", "build", "-t", tag, str(tmp)]
         log.info("Building CuraEngine Docker image: %s", " ".join(build_cmd))
         result = subprocess.run(build_cmd, capture_output=True, text=True, timeout=120)

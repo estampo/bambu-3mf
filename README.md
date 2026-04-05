@@ -1,21 +1,21 @@
-# bambu-3mf
+# bambox
 
 Package plain G-code into Bambu Lab `.gcode.3mf` files — no OrcaSlicer required.
 
-`bambu-3mf` is a standalone Python library for creating printer-ready Bambu Lab
+`bambox` is a standalone Python library for creating printer-ready Bambu Lab
 archives from any G-code source. It handles the BBL-specific packaging format
 (metadata, checksums, settings) so that any slicer — CuraEngine, PrusaSlicer,
 KiriMoto, or a custom toolpath generator — can target Bambu printers.
 
 ## Where This Fits
 
-`bambu-3mf` is one piece of a three-project architecture that decouples
+`bambox` is one piece of a three-project architecture that decouples
 [estampo](https://github.com/estampo/estampo) from OrcaSlicer:
 
 ```
 estampo (pipeline + slicer backends)
     ↓ G-code
-bambu-3mf (packaging + settings generation)
+bambox (packaging + settings generation)
     ↓ .gcode.3mf
 bambu-cloud (printer communication)
     ↓ MQTT/FTP
@@ -26,7 +26,7 @@ Bambu printer
 management, CI integration. It can invoke any slicer backend and delegates
 Bambu-specific concerns downward.
 
-**bambu-3mf** (this project) owns two things: (1) the `.gcode.3mf` archive
+**bambox** (this project) owns two things: (1) the `.gcode.3mf` archive
 format that Bambu firmware requires, and (2) the slicer settings blob
 (`project_settings.config`) that would normally come from OrcaSlicer. It can
 generate the full 544-key settings from just a machine name and filament types.
@@ -34,13 +34,13 @@ generate the full 544-key settings from just a machine name and filament types.
 **bambu-cloud** (currently the `bridge` module here, to be extracted) handles
 printer communication via the Bambu Network Library Docker bridge.
 
-Each project is independently useful. You don't need estampo to use bambu-3mf,
-and you don't need bambu-3mf to use bambu-cloud.
+Each project is independently useful. You don't need estampo to use bambox,
+and you don't need bambox to use bambu-cloud.
 
 ## Installation
 
 ```
-pip install bambu-3mf
+pip install bambox
 ```
 
 ## Packaging G-code
@@ -49,7 +49,7 @@ pip install bambu-3mf
 
 ```python
 from pathlib import Path
-from bambu_3mf import pack_gcode_3mf, SliceInfo, FilamentInfo
+from bambox import pack_gcode_3mf, SliceInfo, FilamentInfo
 
 gcode = Path("plate_1.gcode").read_bytes()
 
@@ -64,7 +64,7 @@ pack_gcode_3mf(gcode, Path("output.gcode.3mf"), slice_info=info)
 ### With generated settings (no OrcaSlicer)
 
 ```python
-from bambu_3mf.settings import build_project_settings
+from bambox.settings import build_project_settings
 
 settings = build_project_settings(
     filaments=["PETG-CF"],
@@ -85,13 +85,13 @@ pack_gcode_3mf(
 
 ```bash
 # Package G-code into a .gcode.3mf
-bambu-3mf pack plate_1.gcode -o output.gcode.3mf
+bambox pack plate_1.gcode -o output.gcode.3mf
 
 # Query printer status and AMS tray info
-bambu-3mf status DEVICE_SERIAL
+bambox status DEVICE_SERIAL
 
 # Send a .gcode.3mf to a Bambu printer via cloud
-bambu-3mf print output.gcode.3mf --device DEVICE_SERIAL
+bambox print output.gcode.3mf --device DEVICE_SERIAL
 ```
 
 ## Modules
@@ -114,7 +114,7 @@ Available machines: `p1s`
 Available filaments: `pla`, `asa`, `petg_cf`
 
 ```python
-from bambu_3mf.settings import available_machines, available_filaments, build_project_settings
+from bambox.settings import available_machines, available_filaments, build_project_settings
 ```
 
 ### `bridge` — Cloud Printing
@@ -124,7 +124,7 @@ and handle AMS tray mapping. Reads credentials from
 `~/.config/estampo/credentials.toml`.
 
 ```python
-from bambu_3mf.bridge import cloud_print, query_status
+from bambox.bridge import cloud_print, query_status
 ```
 
 ## BBL `.gcode.3mf` Format
@@ -152,7 +152,7 @@ All files include MD5 checksums validated by the printer firmware.
 ```bash
 uv pip install -e .
 uv run ruff check src tests
-uv run mypy src/bambu_3mf
+uv run mypy src/bambox
 uv run pytest
 ```
 

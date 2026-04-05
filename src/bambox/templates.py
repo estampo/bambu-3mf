@@ -112,8 +112,7 @@ def render_template(
         from jinja2 import Environment, FileSystemLoader, Undefined
     except ImportError:
         raise ImportError(
-            "Jinja2 is required for template rendering. "
-            "Install with: pip install bambu-3mf[templates]"
+            "Jinja2 is required for template rendering. Install with: pip install bambox[templates]"
         )
 
     class SilentUndefined(Undefined):

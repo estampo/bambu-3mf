@@ -6,7 +6,7 @@
 //! - AMS mapping (match virtual filament slots to physical trays)
 //! - Config 3MF color patching to match AMS tray colors
 //!
-//! Ported from `src/bambu_3mf/bridge.py` — preserving exact behavior.
+//! Ported from `src/bambox/bridge.py` — preserving exact behavior.
 
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};

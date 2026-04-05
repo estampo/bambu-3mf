@@ -1,8 +1,8 @@
 """Package plain G-code into Bambu Lab .gcode.3mf files."""
 
-from bambu_3mf.assemble import assemble_gcode
-from bambu_3mf.gcode_compat import is_bbl_gcode, translate_to_bbl
-from bambu_3mf.pack import (
+from bambox.assemble import assemble_gcode
+from bambox.gcode_compat import is_bbl_gcode, translate_to_bbl
+from bambox.pack import (
     FilamentInfo,
     ObjectInfo,
     SliceInfo,

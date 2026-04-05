@@ -1,4 +1,4 @@
-"""CLI entry point for bambu-3mf."""
+"""CLI entry point for bambox."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import logging
 import sys
 from pathlib import Path
 
-from bambu_3mf.pack import FilamentInfo, SliceInfo, pack_gcode_3mf
+from bambox.pack import FilamentInfo, SliceInfo, pack_gcode_3mf
 
 
 def _cmd_pack(args: argparse.Namespace) -> None:
@@ -38,7 +38,7 @@ def _cmd_pack(args: argparse.Namespace) -> None:
 
 def _cmd_print(args: argparse.Namespace) -> None:
     """Send a .gcode.3mf to a Bambu printer via cloud bridge."""
-    from bambu_3mf.bridge import cloud_print, load_credentials
+    from bambox.bridge import cloud_print, load_credentials
 
     threemf = args.threemf
     if not threemf.exists():
@@ -121,7 +121,7 @@ def _cmd_print(args: argparse.Namespace) -> None:
 
 def _cmd_status(args: argparse.Namespace) -> None:
     """Query printer status."""
-    from bambu_3mf.bridge import load_credentials, query_status, _write_token_json, parse_ams_trays
+    from bambox.bridge import load_credentials, query_status, _write_token_json, parse_ams_trays
 
     creds_path = Path(args.credentials) if args.credentials else None
     credentials = load_credentials(creds_path)
@@ -155,7 +155,7 @@ def _cmd_status(args: argparse.Namespace) -> None:
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
-        prog="bambu-3mf",
+        prog="bambox",
         description="Package and print G-code on Bambu Lab printers",
     )
     parser.add_argument("-v", "--verbose", action="store_true", help="Enable debug logging")
@@ -217,7 +217,7 @@ def main(argv: list[str] | None = None) -> None:
         if argv is None:
             argv = sys.argv[1:]
         if argv and not argv[0].startswith("-") and Path(argv[0]).suffix in (".gcode", ".g"):
-            # Legacy mode: bambu-3mf file.gcode
+            # Legacy mode: bambox file.gcode
             ns = argparse.Namespace(
                 gcode=Path(argv[0]),
                 output=None,

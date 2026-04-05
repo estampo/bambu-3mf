@@ -1,4 +1,4 @@
-# bambu-3mf - Claude Code Instructions
+# bambox - Claude Code Instructions
 
 ## Working with the maintainer
 The project maintainer is technically experienced and understands the codebase deeply. Trust their judgement. Don't second-guess their observations or explain things they already know.
@@ -7,7 +7,7 @@ The project maintainer is technically experienced and understands the codebase d
 Before pushing any PR branch, always run locally:
 1. `uv run ruff check src tests` — lint must pass with zero errors
 2. `uv run ruff format --check src tests` — formatting must pass (run `uv run ruff format src tests` to auto-fix)
-3. `uv run mypy src/bambu_3mf` — type check must pass with zero errors
+3. `uv run mypy src/bambox` — type check must pass with zero errors
 4. `uv run pytest` — all tests must pass
 
 Do NOT push a PR until all four checks pass locally.
@@ -38,7 +38,7 @@ Each module has a defined scope. Do not add logic to the wrong module — even i
 ## Architecture: Key Decisions
 
 ### Template-Driven Settings (544 keys)
-Bambu printers require a `project_settings.config` with ~544 keys in the .gcode.3mf archive. Rather than passing slicer output through, bambu-3mf builds this from:
+Bambu printers require a `project_settings.config` with ~544 keys in the .gcode.3mf archive. Rather than passing slicer output through, bambox builds this from:
 1. Machine base profile (e.g. `base_p1s.json` — 544 keys)
 2. Filament type profiles (`filament_pla.json`, etc. — per-type overrides)
 3. `_varying_keys.json` — keys that differ per filament slot
@@ -57,18 +57,18 @@ The archive format is validated by printer firmware. Key constraints:
 - Per-filament arrays must be padded to exactly 5 slots (P1S)
 - Both OrcaSlicer 2.3.1 and BambuStudio 2.5.0.66 format versions supported
 
-## What bambu-3mf is NOT
+## What bambox is NOT
 
 - **Not a slicer.** It packages G-code produced by slicers. The CuraEngine integration in `cura.py` invokes an external engine — it does not implement slicing.
 - **Not a printer API client.** It wraps the Docker bridge for cloud printing. The actual protocol implementation lives in the bridge binary (C++ today, Rust planned).
-- **Not estampo.** estampo is the pipeline orchestrator. bambu-3mf is the Bambu Lab packaging library that estampo depends on. Do not add pipeline, DAG, or orchestration logic here.
+- **Not estampo.** estampo is the pipeline orchestrator. bambox is the Bambu Lab packaging library that estampo depends on. Do not add pipeline, DAG, or orchestration logic here.
 - **Not a profile editor.** It loads and overlays profiles. Do not build profile editing or merging UI.
 
 ## Relationship to estampo
 
-bambu-3mf is one piece of a three-project architecture:
+bambox is one piece of a three-project architecture:
 - **estampo** — pipeline orchestrator, slicer-agnostic
-- **bambu-3mf** — BBL .gcode.3mf packaging + G-code templates + settings generation
+- **bambox** — BBL .gcode.3mf packaging + G-code templates + settings generation
 - **bambu-cloud** (planned) — printer communication
 
-Per estampo ADR-005, bambu-3mf will absorb printer code from estampo at v0.4.0. See `docs/bridge-migration-plan.md` for the Rust bridge migration plan.
+Per estampo ADR-005, bambox will absorb printer code from estampo at v0.4.0. See `docs/bridge-migration-plan.md` for the Rust bridge migration plan.

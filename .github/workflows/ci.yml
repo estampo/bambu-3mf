@@ -21,7 +21,7 @@ jobs:
       - run: uv sync --extra dev
       - run: uv run ruff check src tests
       - run: uv run ruff format --check src tests
-      - run: uv run mypy src/bambu_3mf
+      - run: uv run mypy src/bambox
 
   changelog:
     if: github.event_name == 'pull_request'
@@ -60,7 +60,7 @@ jobs:
           python-version: "3.13"
           enable-cache: true
       - run: uv sync --extra dev
-      - run: uv run pytest --cov=bambu_3mf --cov-report=xml -v
+      - run: uv run pytest --cov=bambox --cov-report=xml -v
       - uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}

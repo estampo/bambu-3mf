@@ -1,13 +1,13 @@
 # Changelog
 
-All notable changes to bambu-3mf are documented here.
+All notable changes to bambox are documented here.
 This changelog is managed by [towncrier](https://towncrier.readthedocs.io/).
 
 <!-- towncrier release notes start -->
 
 ## 0.1.0 — 2026-03-15
 
-Initial release of bambu-3mf as a standalone library.
+Initial release of bambox as a standalone library.
 
 ### Features
 

@@ -2,7 +2,7 @@
 
 Wraps the estampo/cloud-bridge Docker container to send prints, query status,
 and manage AMS tray mapping. No dependency on the estampo package — this module
-is self-contained for standalone bambu-3mf usage.
+is self-contained for standalone bambox usage.
 """
 
 from __future__ import annotations
@@ -56,7 +56,7 @@ def _write_token_json(cloud: dict[str, str], directory: Path | None = None) -> P
         "email": cloud.get("email", ""),
         "uid": cloud.get("uid", ""),
     }
-    d = directory or Path.home() / ".cache" / "bambu-3mf"
+    d = directory or Path.home() / ".cache" / "bambox"
     d.mkdir(parents=True, exist_ok=True)
     tmp = tempfile.NamedTemporaryFile(
         mode="w", suffix=".json", prefix="bambu_token_", dir=d, delete=False
@@ -143,7 +143,7 @@ def _run_bridge_baked(
             lines.append(f"COPY {basename} {container_path}")
         (tmpdir / "Dockerfile").write_text("\n".join(lines) + "\n")
 
-        tag = "bambu-3mf-bridge-tmp"
+        tag = "bambox-bridge-tmp"
         build = subprocess.run(
             ["docker", "build", "-t", tag, "."],
             capture_output=True,
@@ -397,7 +397,7 @@ def cloud_print(
     credentials: dict[str, str] | None = None,
     credentials_path: Path | None = None,
     *,
-    project_name: str = "bambu-3mf",
+    project_name: str = "bambox",
     timeout: int = 180,
     verbose: bool = False,
     skip_ams_mapping: bool = False,

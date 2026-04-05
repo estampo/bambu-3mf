@@ -16,9 +16,9 @@ from io import BytesIO
 from pathlib import Path
 
 
-from bambu_3mf.assemble import assemble_gcode
-from bambu_3mf.pack import FilamentInfo, SliceInfo, pack_gcode_3mf
-from bambu_3mf.templates import render_template
+from bambox.assemble import assemble_gcode
+from bambox.pack import FilamentInfo, SliceInfo, pack_gcode_3mf
+from bambox.templates import render_template
 
 
 FIXTURES = Path(__file__).parent / "fixtures"

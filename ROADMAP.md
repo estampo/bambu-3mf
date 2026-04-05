@@ -1,4 +1,4 @@
-# bambu-3mf Roadmap
+# bambox Roadmap
 
 This is a living document updated at each release. It captures what's done, what's in scope for the next milestone, and what's explicitly deferred.
 
@@ -53,13 +53,13 @@ See `docs/bridge-migration-plan.md` for full design.
 
 **Theme: Absorb printer code from estampo. Phase 1 of the split.**
 
-Per estampo ADR-005, bambu-3mf becomes the standalone Bambu packaging + communication library.
+Per estampo ADR-005, bambox becomes the standalone Bambu packaging + communication library.
 
 - Migrate `cloud/bridge.py` from estampo (rewrite as HTTP client to Rust daemon)
 - Migrate `cloud/ams.py`, `auth.py`, `credentials.py`, `printer.py` from estampo
 - Migrate associated tests
-- bambu-3mf publishes release with new modules
-- estampo drops printer code, adds optional `bambu-3mf` dependency
+- bambox publishes release with new modules
+- estampo drops printer code, adds optional `bambox` dependency
 - Docker image for Rust bridge daemon (`estampo/bambu-bridge:latest`)
 
 ---
@@ -90,8 +90,8 @@ Three independent projects, each owning one concern:
 
 ```
 estampo          -> pipeline orchestrator, slicer-agnostic
-bambu-3mf        -> BBL packaging + G-code templates + printer communication
-bambu-cloud      -> (may merge into bambu-3mf as the Rust bridge)
+bambox        -> BBL packaging + G-code templates + printer communication
+bambu-cloud      -> (may merge into bambox as the Rust bridge)
 ```
 
 Every feature decision should move toward this split, not away from it.
