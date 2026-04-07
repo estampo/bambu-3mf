@@ -2,11 +2,19 @@
 #
 # The daemon provides an HTTP API (axum) for Bambu Lab printer communication
 # via libbambu_networking.so FFI.
+#
+# Usage:
+#   docker build -t bambox/bridge bridge/
+#   docker run --rm -v /path/to/credentials.toml:/config/credentials.toml:ro \
+#     -p 8765:8765 bambox/bridge
+#
+# Note: x86_64/amd64 only (libbambu_networking.so is an x86_64 binary).
+# On Apple Silicon Macs, Docker runs this via Rosetta emulation.
 
 # ---------------------------------------------------------------------------
 # Build stage: compile the Rust binary with C++ shim
 # ---------------------------------------------------------------------------
-FROM rust:1.83-bookworm AS builder
+FROM --platform=linux/amd64 rust:1.83-bookworm AS builder
 
 # g++ is required by the cc crate to compile the C++ shim (shim/shim.cpp)
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -32,24 +40,54 @@ COPY build.rs ./
 RUN cargo build --release
 
 # ---------------------------------------------------------------------------
-# Runtime stage: minimal image with just the binary
+# Runtime stage: minimal image with the binary and libbambu_networking.so
 # ---------------------------------------------------------------------------
-FROM debian:bookworm-slim
+FROM --platform=linux/amd64 debian:bookworm-slim
+
+LABEL org.opencontainers.image.description="bambox bridge daemon — Bambu Lab printer communication via HTTP API"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libssl3 \
     ca-certificates \
+    curl \
+    python3 \
+    unzip \
     && rm -rf /var/lib/apt/lists/*
 
-# libbambu_networking.so is proprietary and cannot be bundled in this image.
-# It must be provided at runtime, either by:
-#   - Volume mount: docker run -v /path/to/libbambu_networking.so:/usr/lib/libbambu_networking.so ...
-#   - Baking into a derived image: COPY libbambu_networking.so /usr/lib/
-#
-# The daemon loads it via dlopen at the path specified by --lib-path
-# (default: /tmp/bambu_plugin/libbambu_networking.so, override via BAMBU_LIB_PATH env).
+# Fetch libbambu_networking.so — try Bambu's API first, fall back to private cache.
+# The API returns a signed CDN URL for the current Linux plugin zip.
+# If Bambu's API/CDN is unavailable, fetch from a private GitHub release.
+ARG BAMBU_SLICER_VERSION=02.05.00.00
+ARG BNL_TOKEN=""
+RUN mkdir -p /tmp/bambu_plugin \
+    && (PLUGIN_URL=$(curl -fsSL \
+        -H "User-Agent: BambuStudio/${BAMBU_SLICER_VERSION}" \
+        -H "X-BBL-OS-Type: linux" \
+        "https://api.bambulab.com/v1/iot-service/api/slicer/resource?slicer/plugins/cloud=${BAMBU_SLICER_VERSION}" \
+        | python3 -c "import sys,json; r=json.load(sys.stdin)['resources']; print([x for x in r if 'plugins' in x['type']][0]['url'])") \
+    && curl -fsSL -o /tmp/plugins.zip "$PLUGIN_URL" \
+    && unzip -j /tmp/plugins.zip libbambu_networking.so -d /tmp/bambu_plugin/ \
+    && rm /tmp/plugins.zip \
+    && echo "Fetched libbambu_networking.so from Bambu API") \
+    || (echo "Bambu API failed, falling back to private cache..." \
+    && curl -fsSL \
+        -H "Authorization: token ${BNL_TOKEN}" \
+        -H "Accept: application/octet-stream" \
+        -o /tmp/bambu_plugin/libbambu_networking.so \
+        "https://api.github.com/repos/estampo/bnl/releases/assets/$(curl -fsSL \
+            -H "Authorization: token ${BNL_TOKEN}" \
+            "https://api.github.com/repos/estampo/bnl/releases/tags/v${BAMBU_SLICER_VERSION}" \
+            | python3 -c "import sys,json; print([a for a in json.load(sys.stdin)['assets'] if a['name']=='libbambu_networking.so'][0]['id'])")" \
+    && echo "Fetched libbambu_networking.so from private cache")
+
+# Download slicer TLS certificate (for MQTT to *.bambulab.com)
+RUN mkdir -p /tmp/bambu_agent/cert /tmp/bambu_agent/log /tmp/bambu_agent/config \
+    && curl -fSL -o /tmp/bambu_agent/cert/slicer_base64.cer \
+       "https://raw.githubusercontent.com/bambulab/BambuStudio/master/resources/cert/slicer_base64.cer"
 
 COPY --from=builder /build/target/release/bambu-bridge /usr/local/bin/bambu-bridge
+
+ENV BAMBU_LIB_PATH=/tmp/bambu_plugin/libbambu_networking.so
 
 EXPOSE 8765
 
