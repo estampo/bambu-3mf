@@ -1,0 +1,62 @@
+name: Build bridge binaries
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  build-bridge:
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            artifact: bambu-bridge-linux-x86_64
+          - target: x86_64-apple-darwin
+            os: macos-13
+            artifact: bambu-bridge-macos-x86_64
+          - target: aarch64-apple-darwin
+            os: macos-14
+            artifact: bambu-bridge-macos-arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Install g++ (Linux only)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y g++
+      - name: Build
+        working-directory: bridge
+        run: cargo build --release --target ${{ matrix.target }}
+      - name: Package binary
+        run: |
+          mkdir -p dist
+          cp bridge/target/${{ matrix.target }}/release/bambu-bridge dist/${{ matrix.artifact }}
+          chmod +x dist/${{ matrix.artifact }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/${{ matrix.artifact }}
+
+  release-assets:
+    needs: build-bridge
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Upload to GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG=${GITHUB_REF#refs/tags/}
+          for f in dist/*; do
+            gh release upload "$TAG" "$f" --repo "${{ github.repository }}" --clobber
+          done
