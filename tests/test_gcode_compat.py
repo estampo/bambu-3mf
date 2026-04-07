@@ -7,7 +7,6 @@ from bambox.gcode_compat import (
     translate_to_bbl,
 )
 
-
 # --- is_bbl_gcode ---
 
 
