@@ -14,7 +14,7 @@ jobs:
             os: ubuntu-latest
             artifact: bambu-bridge-linux-x86_64
           - target: x86_64-apple-darwin
-            os: macos-13
+            os: macos-15
             artifact: bambu-bridge-macos-x86_64
           - target: aarch64-apple-darwin
             os: macos-14

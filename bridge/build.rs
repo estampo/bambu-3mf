@@ -11,6 +11,10 @@ fn main() {
         println!("cargo:rustc-link-lib=dl");
     }
     println!("cargo:rustc-link-lib=pthread");
-    println!("cargo:rustc-link-lib=stdc++");
+    if target_os == "macos" {
+        println!("cargo:rustc-link-lib=c++");
+    } else {
+        println!("cargo:rustc-link-lib=stdc++");
+    }
     println!("cargo:rerun-if-changed=shim/shim.cpp");
 }
