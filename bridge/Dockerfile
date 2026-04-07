@@ -14,7 +14,7 @@
 # ---------------------------------------------------------------------------
 # Build stage: compile the Rust binary with C++ shim
 # ---------------------------------------------------------------------------
-FROM --platform=linux/amd64 rust:1.83-bookworm AS builder
+FROM --platform=linux/amd64 rust:1.88-bookworm AS builder
 
 # g++ is required by the cc crate to compile the C++ shim (shim/shim.cpp)
 RUN apt-get update && apt-get install -y --no-install-recommends \
