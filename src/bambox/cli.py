@@ -121,7 +121,7 @@ def _cmd_print(args: argparse.Namespace) -> None:
 
 def _cmd_status(args: argparse.Namespace) -> None:
     """Query printer status."""
-    from bambox.bridge import load_credentials, query_status, _write_token_json, parse_ams_trays
+    from bambox.bridge import _write_token_json, load_credentials, parse_ams_trays, query_status
 
     creds_path = Path(args.credentials) if args.credentials else None
     credentials = load_credentials(creds_path)

@@ -15,11 +15,9 @@ import zipfile
 from io import BytesIO
 from pathlib import Path
 
-
 from bambox.assemble import assemble_gcode
 from bambox.pack import FilamentInfo, SliceInfo, pack_gcode_3mf
 from bambox.templates import render_template
-
 
 FIXTURES = Path(__file__).parent / "fixtures"
 PROJECT_SETTINGS = json.loads((FIXTURES / "project_settings.json").read_text())

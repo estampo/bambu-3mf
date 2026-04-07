@@ -13,7 +13,6 @@ from io import BytesIO
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
-
 from bambox.pack import (
     FilamentInfo,
     SliceInfo,
@@ -21,7 +20,6 @@ from bambox.pack import (
     fixup_project_settings,
     pack_gcode_3mf,
 )
-
 
 FIXTURES = Path(__file__).parent / "fixtures"
 REFERENCE = FIXTURES / "reference.gcode.3mf"

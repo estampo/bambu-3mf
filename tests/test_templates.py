@@ -4,9 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 from bambox.templates import orca_to_jinja2, render_template
-
 
 # ---------------------------------------------------------------------------
 # OrcaSlicer → Jinja2 conversion
