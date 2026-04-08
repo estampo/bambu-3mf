@@ -49,6 +49,7 @@ M17 R ; restore z current
 M220 S100  ; Reset feedrate magnitude
 M201.2 K1.0 ; Reset acc magnitude
 M73.2   R1.0 ;Reset left time magnitude
+M73 P100 R0 ; signal 100% complete — without this the printer stays stuck at 99%
 M1002 set_gcode_claim_speed_level : 0
 
 M17 X0.8 Y0.8 Z0.5 ; lower motor current to 45% power

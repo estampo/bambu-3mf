@@ -1,0 +1,1 @@
+Add M73 P100 R0 to end G-code so the printer transitions to 100% complete instead of staying stuck at 99%.

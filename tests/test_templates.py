@@ -186,6 +186,16 @@ class TestRenderTemplate:
         # max_layer_z + 100 = 200 < 250, should use the calculated value
         assert "G1 Z200 F600" in result
 
+    def test_p1s_end_signals_completion(self) -> None:
+        """End gcode must include M73 P100 R0 so printer transitions to 100%."""
+        result = render_template(
+            "p1s_end.gcode.j2",
+            {
+                "max_layer_z": 20.0,
+            },
+        )
+        assert "M73 P100 R0" in result
+
     def test_p1s_end_z_retract_clamped(self) -> None:
         """End gcode clamps Z at 250 for tall prints."""
         result = render_template(
