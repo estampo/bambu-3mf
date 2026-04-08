@@ -9,6 +9,25 @@ import sys
 from pathlib import Path
 
 from bambox.pack import FilamentInfo, SliceInfo, pack_gcode_3mf
+from bambox.settings import available_filaments, available_machines, build_project_settings
+
+
+def _parse_filament_args(
+    filament_args: list[str] | None,
+) -> list[tuple[str, str]]:
+    """Parse --filament TYPE or --filament TYPE:COLOR into (type, color) pairs."""
+    if not filament_args:
+        return [("PLA", "#F2754E")]
+    result = []
+    for spec in filament_args:
+        if ":" in spec:
+            ftype, color = spec.split(":", 1)
+            if not color.startswith("#"):
+                color = "#" + color
+            result.append((ftype.upper(), color))
+        else:
+            result.append((spec.upper(), "#F2754E"))
+    return result
 
 
 def _cmd_pack(args: argparse.Namespace) -> None:
@@ -20,19 +39,37 @@ def _cmd_pack(args: argparse.Namespace) -> None:
     output = args.output or args.gcode.with_suffix(".gcode.3mf")
     gcode = args.gcode.read_bytes()
 
+    filaments = _parse_filament_args(args.filament)
+    filament_types = [f[0] for f in filaments]
+    filament_colors = [f[1] for f in filaments]
+
+    filament_infos = [
+        FilamentInfo(
+            slot=i + 1,
+            filament_type=ftype,
+            color=color,
+        )
+        for i, (ftype, color) in enumerate(filaments)
+    ]
+
     info = SliceInfo(
         printer_model_id=args.printer_model_id,
         nozzle_diameter=args.nozzle_diameter,
-        filaments=[
-            FilamentInfo(
-                slot=1,
-                filament_type=args.filament_type,
-                color=args.filament_color,
-            )
-        ],
+        filaments=filament_infos,
     )
 
-    pack_gcode_3mf(gcode, output, slice_info=info)
+    # Generate project_settings from machine + filament profiles
+    try:
+        project_settings = build_project_settings(
+            filament_types,
+            machine=args.machine,
+            filament_colors=filament_colors,
+        )
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    pack_gcode_3mf(gcode, output, slice_info=info, project_settings=project_settings)
     print(f"Wrote {output} ({output.stat().st_size} bytes)")
 
 
@@ -165,10 +202,22 @@ def main(argv: list[str] | None = None) -> None:
     pack_p = sub.add_parser("pack", help="Package G-code into .gcode.3mf")
     pack_p.add_argument("gcode", type=Path, help="Input G-code file")
     pack_p.add_argument("-o", "--output", type=Path, help="Output .gcode.3mf path")
+    pack_p.add_argument(
+        "-m",
+        "--machine",
+        default="p1s",
+        help=f"Machine profile ({', '.join(available_machines())})",
+    )
+    pack_p.add_argument(
+        "-f",
+        "--filament",
+        action="append",
+        metavar="TYPE[:COLOR]",
+        help=f"Filament type, optionally with color (e.g. 'PETG-CF' or 'PLA:#FF0000'). "
+        f"Repeatable for multi-filament. Available: {', '.join(available_filaments())}",
+    )
     pack_p.add_argument("--printer-model-id", default="")
     pack_p.add_argument("--nozzle-diameter", type=float, default=0.4)
-    pack_p.add_argument("--filament-type", default="PLA")
-    pack_p.add_argument("--filament-color", default="#F2754E")
 
     # --- print subcommand ---
     print_p = sub.add_parser("print", help="Send .gcode.3mf to printer via cloud bridge")
@@ -221,10 +270,10 @@ def main(argv: list[str] | None = None) -> None:
             ns = argparse.Namespace(
                 gcode=Path(argv[0]),
                 output=None,
+                machine="p1s",
+                filament=None,
                 printer_model_id="",
                 nozzle_diameter=0.4,
-                filament_type="PLA",
-                filament_color="#F2754E",
                 verbose=False,
             )
             _cmd_pack(ns)

@@ -16,6 +16,7 @@ from io import BytesIO
 from pathlib import Path
 
 from bambox.assemble import assemble_gcode
+from bambox.cli import _parse_filament_args, main
 from bambox.pack import FilamentInfo, SliceInfo, pack_gcode_3mf
 from bambox.templates import render_template
 
@@ -248,3 +249,88 @@ class TestEndToEnd:
         end_pos = gcode.index(";===== date: 20230428")
 
         assert start_pos < toolpath_pos < end_pos
+
+
+class TestParseFilamentArgs:
+    def test_default_when_none(self) -> None:
+        result = _parse_filament_args(None)
+        assert result == [("PLA", "#F2754E")]
+
+    def test_single_type(self) -> None:
+        result = _parse_filament_args(["PETG-CF"])
+        assert result == [("PETG-CF", "#F2754E")]
+
+    def test_type_with_color(self) -> None:
+        result = _parse_filament_args(["PLA:#FF0000"])
+        assert result == [("PLA", "#FF0000")]
+
+    def test_color_without_hash(self) -> None:
+        result = _parse_filament_args(["ASA:BCBCBC"])
+        assert result == [("ASA", "#BCBCBC")]
+
+    def test_multiple_filaments(self) -> None:
+        result = _parse_filament_args(["PETG-CF:#2850E0", "PLA"])
+        assert result == [("PETG-CF", "#2850E0"), ("PLA", "#F2754E")]
+
+    def test_lowercase_normalized(self) -> None:
+        result = _parse_filament_args(["pla"])
+        assert result == [("PLA", "#F2754E")]
+
+
+class TestCliPack:
+    def test_pack_generates_project_settings(self, tmp_path: Path) -> None:
+        """CLI pack should auto-generate project_settings from machine+filament."""
+        gcode_file = tmp_path / "test.gcode"
+        gcode_file.write_text("G28\nG1 Z0.2 F1200\nG1 X10 Y10 E1 F600\n")
+        output = tmp_path / "test.gcode.3mf"
+
+        main(["pack", str(gcode_file), "-o", str(output), "-f", "PLA"])
+
+        assert output.exists()
+        with zipfile.ZipFile(output) as z:
+            names = z.namelist()
+            assert "Metadata/project_settings.config" in names
+            ps = json.loads(z.read("Metadata/project_settings.config"))
+            # Should have 544+ keys
+            assert len(ps) > 500
+            # Arrays padded to 5
+            for key, val in ps.items():
+                if isinstance(val, list) and len(val) > 0:
+                    assert len(val) >= 5
+
+    def test_pack_multi_filament(self, tmp_path: Path) -> None:
+        gcode_file = tmp_path / "multi.gcode"
+        gcode_file.write_text("G28\nG1 Z0.2 F1200\nG1 X10 Y10 E1 F600\n")
+        output = tmp_path / "multi.gcode.3mf"
+
+        main(
+            [
+                "pack",
+                str(gcode_file),
+                "-o",
+                str(output),
+                "-f",
+                "PETG-CF:#2850E0",
+                "-f",
+                "PLA:#000000",
+            ]
+        )
+
+        with zipfile.ZipFile(output) as z:
+            ps = json.loads(z.read("Metadata/project_settings.config"))
+            # filament_colour should have our colors
+            colors = ps["filament_colour"]
+            assert colors[0] == "#2850E0"
+            assert colors[1] == "#000000"
+
+    def test_pack_default_filament(self, tmp_path: Path) -> None:
+        """Pack with no --filament flag defaults to PLA."""
+        gcode_file = tmp_path / "default.gcode"
+        gcode_file.write_text("G28\nG1 Z0.2 F1200\nG1 X10 Y10 E1 F600\n")
+        output = tmp_path / "default.gcode.3mf"
+
+        main(["pack", str(gcode_file), "-o", str(output)])
+
+        with zipfile.ZipFile(output) as z:
+            ps = json.loads(z.read("Metadata/project_settings.config"))
+            assert len(ps) > 500
