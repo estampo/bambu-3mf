@@ -1,5 +1,10 @@
 # bambox
 
+[![CI](https://github.com/estampo/bambox/actions/workflows/ci.yml/badge.svg)](https://github.com/estampo/bambox/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/estampo/bambox/branch/main/graph/badge.svg)](https://codecov.io/gh/estampo/bambox)
+[![PyPI version](https://img.shields.io/pypi/v/bambu-3mf)](https://pypi.org/project/bambu-3mf/)
+[![Python versions](https://img.shields.io/pypi/pyversions/bambu-3mf)](https://pypi.org/project/bambu-3mf/)
+
 Package plain G-code into Bambu Lab `.gcode.3mf` files — no OrcaSlicer required.
 
 `bambox` is a standalone Python library for creating printer-ready Bambu Lab
