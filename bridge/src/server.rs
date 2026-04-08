@@ -2,6 +2,7 @@
 //!
 //! Endpoints:
 //!   GET  /health            — daemon health + MQTT connection state
+//!   GET  /printers          — list configured printers with cached status summary
 //!   GET  /status/:device_id — cached printer status (instant) or live query
 //!   GET  /ams/:device_id    — AMS tray info extracted from cached status
 //!   POST /cancel/:device_id — cancel current print
@@ -31,12 +32,21 @@ pub struct DeviceStatus {
     pub updated_at: Instant,
 }
 
+/// Configured printer entry from credentials file.
+#[derive(Clone, Debug, Serialize)]
+pub struct PrinterEntry {
+    pub name: String,
+    pub serial: String,
+}
+
 /// Shared state across all HTTP handlers.
 pub struct AppState {
     /// The FFI agent (behind Mutex because it's not Sync).
     pub agent: Mutex<BambuAgent>,
     /// Cached printer status per device_id.
     pub cache: RwLock<HashMap<String, DeviceStatus>>,
+    /// Configured printers from credentials file.
+    pub printers: Vec<PrinterEntry>,
     /// When the daemon started.
     pub started_at: Instant,
 }
@@ -44,10 +54,14 @@ pub struct AppState {
 pub type SharedState = Arc<AppState>;
 
 impl AppState {
-    pub fn new(agent: BambuAgent) -> SharedState {
+    pub fn new(agent: BambuAgent, printers: Vec<(String, String)>) -> SharedState {
         Arc::new(Self {
             agent: Mutex::new(agent),
             cache: RwLock::new(HashMap::new()),
+            printers: printers
+                .into_iter()
+                .map(|(name, serial)| PrinterEntry { name, serial })
+                .collect(),
             started_at: Instant::now(),
         })
     }
@@ -221,6 +235,50 @@ async fn get_ams(
             }),
         )),
     }
+}
+
+/// GET /printers — list configured printers with cached status summary.
+async fn list_printers(State(state): State<SharedState>) -> Json<serde_json::Value> {
+    let cache = state.cache.read().unwrap();
+    let printers: Vec<serde_json::Value> = state
+        .printers
+        .iter()
+        .map(|p| {
+            let mut entry = serde_json::json!({
+                "name": p.name,
+                "serial": p.serial,
+            });
+            if let Some(status) = cache.get(&p.serial) {
+                let print_data = status.payload.get("print").unwrap_or(&status.payload);
+                entry["gcode_state"] = print_data
+                    .get("gcode_state")
+                    .cloned()
+                    .unwrap_or(serde_json::json!(null));
+                entry["nozzle_temper"] = print_data
+                    .get("nozzle_temper")
+                    .cloned()
+                    .unwrap_or(serde_json::json!(null));
+                entry["bed_temper"] = print_data
+                    .get("bed_temper")
+                    .cloned()
+                    .unwrap_or(serde_json::json!(null));
+                entry["subtask_name"] = print_data
+                    .get("subtask_name")
+                    .cloned()
+                    .unwrap_or(serde_json::json!(null));
+                entry["mc_percent"] = print_data
+                    .get("mc_percent")
+                    .cloned()
+                    .unwrap_or(serde_json::json!(null));
+                entry["cached"] = serde_json::json!(true);
+                entry["cache_age_secs"] = serde_json::json!(status.updated_at.elapsed().as_secs());
+            } else {
+                entry["cached"] = serde_json::json!(false);
+            }
+            entry
+        })
+        .collect();
+    Json(serde_json::json!({ "printers": printers }))
 }
 
 async fn cancel_print(
@@ -473,8 +531,14 @@ fn err(status: StatusCode, msg: String) -> (StatusCode, Json<ErrorResponse>) {
 /// Build an AppState with pre-populated cache (for testing without FFI).
 #[cfg(test)]
 pub fn mock_state(devices: HashMap<String, serde_json::Value>) -> SharedState {
-    // We can't create a real BambuAgent without the .so, so we use a test-only
-    // constructor. The agent field won't be accessed in tests that only hit cache.
+    mock_state_with_printers(devices, Vec::new())
+}
+
+#[cfg(test)]
+pub fn mock_state_with_printers(
+    devices: HashMap<String, serde_json::Value>,
+    printers: Vec<(String, String)>,
+) -> SharedState {
     let state = Arc::new(AppState {
         agent: Mutex::new(unsafe { BambuAgent::test_null() }),
         cache: RwLock::new(
@@ -491,6 +555,10 @@ pub fn mock_state(devices: HashMap<String, serde_json::Value>) -> SharedState {
                 })
                 .collect(),
         ),
+        printers: printers
+            .into_iter()
+            .map(|(name, serial)| PrinterEntry { name, serial })
+            .collect(),
         started_at: Instant::now(),
     });
     state
@@ -516,6 +584,7 @@ pub fn router(state: SharedState) -> Router {
     Router::new()
         .route("/ping", get(ping))
         .route("/health", get(health))
+        .route("/printers", get(list_printers))
         .route("/status/:device_id", get(get_status))
         .route("/ams/:device_id", get(get_ams))
         .route("/print", axum::routing::post(start_print))
@@ -610,6 +679,34 @@ mod tests {
         assert_eq!(trays[0]["tray_type"], "PLA");
         assert_eq!(trays[1]["tray_type"], "ASA");
         assert_eq!(body["vt_tray"]["tray_type"], "TPU");
+    }
+
+    #[tokio::test]
+    async fn printers_lists_configured_printers() {
+        let mut devices = HashMap::new();
+        devices.insert("DEV001".into(), sample_status());
+        let printers = vec![
+            ("workshop".to_string(), "DEV001".to_string()),
+            ("office".to_string(), "DEV002".to_string()),
+        ];
+        let state = mock_state_with_printers(devices, printers);
+        let app = router(state);
+        let server = axum_test::TestServer::new(app).unwrap();
+
+        let resp = server.get("/printers").await;
+        resp.assert_status_ok();
+        let body: serde_json::Value = resp.json();
+        let printers = body["printers"].as_array().unwrap();
+        assert_eq!(printers.len(), 2);
+        // First printer has cached status
+        assert_eq!(printers[0]["name"], "workshop");
+        assert_eq!(printers[0]["serial"], "DEV001");
+        assert_eq!(printers[0]["cached"], true);
+        assert_eq!(printers[0]["gcode_state"], "RUNNING");
+        // Second printer has no cached status
+        assert_eq!(printers[1]["name"], "office");
+        assert_eq!(printers[1]["serial"], "DEV002");
+        assert_eq!(printers[1]["cached"], false);
     }
 
     #[tokio::test]
