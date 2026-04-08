@@ -219,9 +219,10 @@ fn best_message(messages: &[callbacks::MqttMessage]) -> Option<&callbacks::MqttM
     messages.iter().max_by_key(|m| m.payload.len())
 }
 
-fn cmd_watch(agent: &BambuAgent, device_id: &str) {
-    let dev_c = std::ffi::CString::new(device_id).unwrap();
-    let module = std::ffi::CString::new("device").unwrap();
+fn cmd_watch(agent: &BambuAgent, device_id: &str) -> Result<(), String> {
+    let dev_c = std::ffi::CString::new(device_id)
+        .map_err(|e| format!("null byte in device_id: {e}"))?;
+    let module = std::ffi::CString::new("device").expect("literal contains no NUL");
 
     unsafe {
         ffi::bambu_shim_set_user_selected_machine(agent.agent_ptr(), dev_c.as_ptr());
@@ -266,7 +267,11 @@ fn cmd_watch(agent: &BambuAgent, device_id: &str) {
             agent.drain_messages();
 
             let pushall = r#"{"pushing":{"sequence_id":"0","command":"pushall","version":1,"push_target":1}}"#;
-            agent.send_message(device_id, pushall);
+            if let Err(e) = agent.send_message(device_id, pushall) {
+                println!("{{\"error\":\"{e}\"}}");
+                io::stdout().flush().unwrap();
+                continue;
+            }
 
             let start = std::time::Instant::now();
             let timeout = Duration::from_secs(10);
@@ -299,6 +304,7 @@ fn cmd_watch(agent: &BambuAgent, device_id: &str) {
             io::stdout().flush().unwrap();
         }
     }
+    Ok(())
 }
 
 #[tokio::main]
@@ -386,7 +392,10 @@ async fn main() {
             suppress_stdout();
             let creds = load_credentials(&creds_path);
             let agent = init_agent(&lib_path, &creds);
-            cmd_watch(&agent, device_id);
+            if let Err(e) = cmd_watch(&agent, device_id) {
+                eprintln!("error: {e}");
+                fast_exit(1);
+            }
             fast_exit(0);
         }
         Command::Daemon { port, bind } => {

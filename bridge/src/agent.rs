@@ -12,6 +12,11 @@ use std::time::Duration;
 use crate::callbacks::{self, CallbackState};
 use crate::ffi;
 
+/// Convert a string to CString, returning an error instead of panicking on null bytes.
+fn to_cstring(s: &str) -> Result<CString, String> {
+    CString::new(s).map_err(|e| format!("null byte in string: {e}"))
+}
+
 /// Print job request parameters.
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct PrintRequest {
@@ -219,7 +224,7 @@ impl BambuAgent {
         let _ = std::fs::create_dir_all(format!("{data_dir}/config"));
         let _ = std::fs::create_dir_all(format!("{data_dir}/cert"));
 
-        let log_dir = CString::new(format!("{data_dir}/log")).unwrap();
+        let log_dir = CString::new(format!("{data_dir}/log")).expect("literal contains no NUL");
         let agent = unsafe { ffi::bambu_shim_create_agent(log_dir.as_ptr()) };
         if agent.is_null() {
             return Err("create_agent returned null".into());
@@ -237,10 +242,10 @@ impl BambuAgent {
 
     /// Set up directories, certs, headers, and register all callbacks.
     fn configure(&mut self) -> Result<(), String> {
-        let config_dir = CString::new(format!("{}/config", self.data_dir)).unwrap();
-        let cert_dir = CString::new(format!("{}/cert", self.data_dir)).unwrap();
-        let cert_name = CString::new("slicer_base64.cer").unwrap();
-        let country = CString::new("US").unwrap();
+        let config_dir = CString::new(format!("{}/config", self.data_dir)).expect("literal contains no NUL");
+        let cert_dir = CString::new(format!("{}/cert", self.data_dir)).expect("literal contains no NUL");
+        let cert_name = CString::new("slicer_base64.cer").expect("literal contains no NUL");
+        let country = CString::new("US").expect("literal contains no NUL");
 
         unsafe {
             ffi::bambu_shim_init_log(self.agent);
@@ -270,7 +275,7 @@ impl BambuAgent {
             ffi::bambu_shim_set_on_user_login_fn(self.agent, callbacks::on_user_login, ctx);
             ffi::bambu_shim_set_on_http_error_fn(self.agent, callbacks::on_http_error, ctx);
 
-            let country_code = CString::new("US").unwrap();
+            let country_code = CString::new("US").expect("literal contains no NUL");
             ffi::bambu_shim_set_get_country_code_fn(self.agent, country_code.as_ptr());
 
             ffi::bambu_shim_set_on_subscribe_failure_fn(
@@ -294,7 +299,7 @@ impl BambuAgent {
             "X-BBL-Language",
         ]
         .iter()
-        .map(|s| CString::new(*s).unwrap())
+        .map(|s| CString::new(*s).expect("literal contains no NUL"))
         .collect();
 
         let vals_owned: Vec<CString> = [
@@ -307,7 +312,7 @@ impl BambuAgent {
             "en",
         ]
         .iter()
-        .map(|s| CString::new(*s).unwrap())
+        .map(|s| CString::new(*s).expect("literal contains no NUL"))
         .collect();
 
         let keys: Vec<*const c_char> = keys_owned.iter().map(|s| s.as_ptr()).collect();
@@ -375,7 +380,7 @@ impl BambuAgent {
         timeout: Duration,
     ) -> Result<(), String> {
         let dev = CString::new(device_id).map_err(|e| e.to_string())?;
-        let module = CString::new("device").unwrap();
+        let module = CString::new("device").expect("literal contains no NUL");
 
         unsafe {
             ffi::bambu_shim_set_user_selected_machine(self.agent, dev.as_ptr());
@@ -393,7 +398,7 @@ impl BambuAgent {
         let pushall = CString::new(
             r#"{"pushing":{"sequence_id":"0","command":"pushall","version":1,"push_target":1}}"#,
         )
-        .unwrap();
+        .expect("literal contains no NUL");
 
         let mut ret;
         for i in 0..3 {
@@ -445,9 +450,9 @@ impl BambuAgent {
     }
 
     /// Send an MQTT message to a device. Tries both send functions.
-    pub fn send_message(&self, device_id: &str, json: &str) -> i32 {
-        let dev = CString::new(device_id).unwrap();
-        let msg = CString::new(json).unwrap();
+    pub fn send_message(&self, device_id: &str, json: &str) -> Result<i32, String> {
+        let dev = to_cstring(device_id)?;
+        let msg = to_cstring(json)?;
         let mut ret =
             unsafe { ffi::bambu_shim_send_message(self.agent, dev.as_ptr(), msg.as_ptr(), 0) };
         if ret != 0 {
@@ -461,7 +466,7 @@ impl BambuAgent {
                 )
             };
         }
-        ret
+        Ok(ret)
     }
 
     /// Start a cloud print job. Subscribes, sends pushall, then calls start_print.
@@ -474,19 +479,19 @@ impl BambuAgent {
         self.subscribe_and_pushall(&params.device_id, Duration::from_secs(20))?;
 
         // Build C-compatible params — keep CStrings alive for the duration
-        let dev_id = CString::new(params.device_id.as_str()).unwrap();
-        let task_name = CString::new("").unwrap();
-        let project_name = CString::new(params.project_name.as_str()).unwrap();
-        let preset_name = CString::new("").unwrap();
-        let filename = CString::new(params.filename.as_str()).unwrap();
-        let config_filename = CString::new(params.config_filename.as_deref().unwrap_or("")).unwrap();
-        let ftp_folder = CString::new("sdcard/").unwrap();
-        let ams_mapping = CString::new(params.ams_mapping.as_deref().unwrap_or("[0,1,2,3]")).unwrap();
-        let ams_mapping2 = CString::new(params.ams_mapping2.as_deref().unwrap_or("")).unwrap();
-        let ams_mapping_info = CString::new("").unwrap();
-        let connection_type = CString::new("cloud").unwrap();
-        let print_type = CString::new("from_normal").unwrap();
-        let bed_type = CString::new("auto").unwrap();
+        let dev_id = to_cstring(&params.device_id)?;
+        let task_name = CString::new("").expect("literal contains no NUL");
+        let project_name = to_cstring(&params.project_name)?;
+        let preset_name = CString::new("").expect("literal contains no NUL");
+        let filename = to_cstring(&params.filename)?;
+        let config_filename = to_cstring(params.config_filename.as_deref().unwrap_or(""))?;
+        let ftp_folder = CString::new("sdcard/").expect("literal contains no NUL");
+        let ams_mapping = to_cstring(params.ams_mapping.as_deref().unwrap_or("[0,1,2,3]"))?;
+        let ams_mapping2 = to_cstring(params.ams_mapping2.as_deref().unwrap_or(""))?;
+        let ams_mapping_info = CString::new("").expect("literal contains no NUL");
+        let connection_type = CString::new("cloud").expect("literal contains no NUL");
+        let print_type = CString::new("from_normal").expect("literal contains no NUL");
+        let bed_type = CString::new("auto").expect("literal contains no NUL");
 
         let shim_params = ffi::ShimPrintParams {
             dev_id: dev_id.as_ptr(),
@@ -543,7 +548,7 @@ impl BambuAgent {
             }
             tracing::warn!("enc flag not ready, retrying in 15s...");
             let pushall = r#"{"pushing":{"sequence_id":"0","command":"pushall","version":1,"push_target":1}}"#;
-            self.send_message(&params.device_id, pushall);
+            self.send_message(&params.device_id, pushall)?;
             std::thread::sleep(Duration::from_secs(15));
         }
 
