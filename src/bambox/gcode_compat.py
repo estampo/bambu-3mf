@@ -248,6 +248,178 @@ def _translate_zchange(text: str) -> str:
     return header + text
 
 
+_TOOL_CHANGE_RE = re.compile(r"^T(\d+)\s*$", re.MULTILINE)
+
+
+def rewrite_tool_changes(
+    toolpath: str,
+    project_settings: dict[str, object],
+    machine: str = "p1s",
+) -> str:
+    """Replace CuraEngine ``T\\d+`` tool change commands with M620/M621 sequences.
+
+    CuraEngine emits bare ``T0``/``T1`` commands for multi-filament prints.
+    Bambu firmware requires M620/M621 sequences with temperature management,
+    AMS loading, nozzle flush, and mechanical travel.
+
+    For each ``T\\d+`` in the toolpath (excluding T255 and T1000 which are
+    special AMS/flush commands), this function renders the machine's
+    toolchange template with per-transition context and replaces the bare
+    command.
+
+    Args:
+        toolpath: Raw toolpath G-code from CuraEngine.
+        project_settings: The 544-key settings dict (arrays indexed by slot).
+        machine: Machine profile name (e.g. "p1s").
+
+    Returns:
+        Toolpath with T commands replaced by M620/M621 sequences.
+    """
+    from bambox.templates import render_template
+
+    # Find all tool changes (bare T0, T1, T2, T3 lines)
+    matches = list(_TOOL_CHANGE_RE.finditer(toolpath))
+    if not matches:
+        return toolpath
+
+    # Helper to safely get array value or scalar
+    def _arr(key: str, idx: int, default: object = 0) -> object:
+        val = project_settings.get(key, default)
+        if isinstance(val, list):
+            return val[idx] if idx < len(val) else val[0] if val else default
+        return val
+
+    def _num(key: str, idx: int, default: float = 0.0) -> float:
+        v = _arr(key, idx, default)
+        if isinstance(v, str):
+            try:
+                return float(v)
+            except ValueError:
+                return default
+        if v is None:
+            return default
+        if isinstance(v, (int, float)):
+            return float(v)
+        return default
+
+    def _int(key: str, idx: int, default: int = 0) -> int:
+        return int(_num(key, idx, float(default)))
+
+    # Track current Z from G-code for max_layer_z / layer_z
+    max_z = 0.0
+    z_at: dict[int, float] = {}  # position → last Z before that point
+    current_z = 0.0
+    for m in re.finditer(r"G[01]\s.*Z([\d.]+)", toolpath):
+        current_z = float(m.group(1))
+        if current_z > max_z:
+            max_z = current_z
+        z_at[m.start()] = current_z
+
+    # Determine initial extruder (before first T command)
+    current_extruder = 0
+    toolchange_count = 0
+
+    # Build replacements in reverse order to preserve positions
+    replacements: list[tuple[int, int, str]] = []
+
+    for match in matches:
+        next_ext = int(match.group(1))
+        # Skip special T commands
+        if next_ext >= 255:
+            continue
+
+        previous_ext = current_extruder
+        toolchange_count += 1
+
+        # Find the Z height at this point in the file
+        layer_z = 0.0
+        for pos, z in z_at.items():
+            if pos < match.start():
+                layer_z = z
+
+        ctx: dict[str, object] = {
+            "next_extruder": next_ext,
+            "previous_extruder": previous_ext,
+            "current_extruder": current_extruder,
+            "toolchange_count": toolchange_count,
+            "max_layer_z": max_z,
+            "layer_z": layer_z,
+            # Temperature
+            "old_filament_temp": _int("nozzle_temperature", previous_ext, 220),
+            "new_filament_temp": _int("nozzle_temperature", next_ext, 220),
+            # Feedrates
+            "old_filament_e_feedrate": _int("filament_max_volumetric_speed", previous_ext, 12),
+            "new_filament_e_feedrate": _int("filament_max_volumetric_speed", next_ext, 12),
+            # Retraction
+            "old_retract_length_toolchange": _num("retract_length_toolchange", previous_ext, 2.0),
+            "new_retract_length_toolchange": _num("retract_length_toolchange", next_ext, 2.0),
+            # Flush lengths — use nozzle_volume_default_values or defaults
+            "flush_length_1": 24.0,
+            "flush_length_2": 24.0,
+            "flush_length_3": 12.0,
+            "flush_length_4": 8.0,
+            # Arrays that the template indexes
+            "z_hop_types": _coerce_array(project_settings.get("z_hop_types", [0, 0, 0, 0, 0])),
+            "long_retractions_when_cut": _coerce_array(
+                project_settings.get("long_retractions_when_cut", [0, 0, 0, 0, 0])
+            ),
+            "retraction_distances_when_cut": _coerce_array(
+                project_settings.get("retraction_distances_when_cut", [18, 18, 18, 18, 18])
+            ),
+            "nozzle_temperature_range_high": _coerce_array(
+                project_settings.get("nozzle_temperature_range_high", [240, 240, 240, 240, 240])
+            ),
+            "filament_type": project_settings.get(
+                "filament_type", ["PLA", "PLA", "PLA", "PLA", "PLA"]
+            ),
+            # Acceleration
+            "default_acceleration": _int("default_acceleration", 0, 10000),
+            "initial_layer_acceleration": _int("initial_layer_acceleration", 0, 500),
+            "initial_layer_print_height": _num("initial_layer_print_height", 0, 0.2),
+            # Fallback positions (used when next_extruder >= 255)
+            "x_after_toolchange": 100,
+            "y_after_toolchange": 100,
+            "z_after_toolchange": layer_z + 2.0,
+            # Travel points (used on second tool change)
+            "travel_point_1_x": 20,
+            "travel_point_1_y": 50,
+            "travel_point_2_x": 60,
+            "travel_point_2_y": 245,
+            "travel_point_3_x": 70,
+            "travel_point_3_y": 265,
+        }
+
+        rendered = render_template(f"{machine}_toolchange.gcode.j2", ctx)
+        replacements.append((match.start(), match.end(), rendered.rstrip("\n")))
+        current_extruder = next_ext
+
+    # Apply replacements in reverse to preserve positions
+    result = toolpath
+    for start, end, replacement in reversed(replacements):
+        result = result[:start] + replacement + result[end:]
+
+    return result
+
+
+def _coerce_array(val: object) -> list[object]:
+    """Ensure a value is a list, coercing string elements to numbers."""
+    if not isinstance(val, list):
+        return [val] * 5
+    result: list[object] = []
+    for item in val:
+        if isinstance(item, str):
+            try:
+                result.append(int(item))
+            except ValueError:
+                try:
+                    result.append(float(item))
+                except ValueError:
+                    result.append(item)
+        else:
+            result.append(item)
+    return result
+
+
 def _build_header_block(total_layers: int, time_secs: int, max_z: str) -> str:
     """Build a BBL-compatible HEADER_BLOCK."""
     mins, secs = divmod(time_secs, 60)
