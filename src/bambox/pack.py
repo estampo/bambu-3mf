@@ -7,7 +7,9 @@ documented in docs/gcode-3mf-format.md in the estampo repo.
 from __future__ import annotations
 
 import hashlib
+import io
 import json
+import re
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -328,6 +330,155 @@ def fixup_project_settings(
             while len(val) < min_slots:
                 val.append(val[-1])
     return result
+
+
+def fixup_model_settings(xml: str, min_slots: int = MIN_SLOTS) -> str:
+    """Fix model_settings.config for Bambu Connect.
+
+    1. Pad ``filament_maps`` value to *min_slots* (e.g. ``"1"`` → ``"1 1 1 1 1"``).
+    2. Add missing thumbnail/bbox metadata keys that Bambu Connect requires.
+    """
+
+    def _pad_maps(m: re.Match[str]) -> str:
+        parts = m.group(1).split()
+        while len(parts) < min_slots:
+            parts.append(parts[-1] if parts else "1")
+        return f'key="filament_maps" value="{" ".join(parts)}"'
+
+    result = re.sub(r'key="filament_maps" value="([^"]*)"', _pad_maps, xml)
+
+    extra_keys = {
+        "thumbnail_file": "Metadata/plate_1.png",
+        "thumbnail_no_light_file": "Metadata/plate_no_light_1.png",
+        "top_file": "Metadata/top_1.png",
+        "pick_file": "Metadata/pick_1.png",
+        "pattern_bbox_file": "Metadata/plate_1.json",
+    }
+    for key, val in extra_keys.items():
+        if f'key="{key}"' not in result:
+            result = result.replace(
+                "  </plate>",
+                f'    <metadata key="{key}" value="{val}"/>\n  </plate>',
+            )
+    return result
+
+
+def repack_3mf(
+    path: Path,
+    *,
+    machine: str | None = None,
+    filaments: list[str] | None = None,
+    filament_colors: list[str] | None = None,
+    min_slots: int = MIN_SLOTS,
+) -> None:
+    """Fix up an existing OrcaSlicer .gcode.3mf for Bambu Connect.
+
+    Applies all BBL firmware fixups in-place:
+
+    1. **project_settings.config** — add missing keys, pad arrays. If *machine*
+       and *filaments* are given, regenerate from profiles instead of patching.
+    2. **model_settings.config** — pad filament_maps, add thumbnail references.
+    3. **Thumbnails** — regenerate from G-code toolpath if missing or broken
+       (headless OrcaSlicer without Xvfb produces empty PNGs).
+
+    Args:
+        path: Path to the .gcode.3mf file (modified in-place).
+        machine: Machine profile name for settings regeneration. If ``None``,
+            existing settings are patched rather than regenerated.
+        filaments: Filament type names for settings regeneration.
+        filament_colors: Hex colors per filament slot.
+        min_slots: Minimum slot count for per-filament arrays (default 5).
+    """
+    _THUMB_MIN_SIZE = 1024
+
+    with zipfile.ZipFile(path, "r") as zin:
+        # --- Fix project_settings.config ---
+        try:
+            ps_raw = zin.read("Metadata/project_settings.config")
+        except KeyError:
+            ps_raw = None
+
+        if machine and filaments:
+            from bambox.settings import build_project_settings
+
+            ps = build_project_settings(
+                filaments,
+                machine=machine,
+                filament_colors=filament_colors,
+                min_slots=min_slots,
+            )
+        elif ps_raw is not None:
+            ps = fixup_project_settings(json.loads(ps_raw), min_slots=min_slots)
+        else:
+            ps = None
+
+        # --- Fix model_settings.config ---
+        try:
+            ms_raw = zin.read("Metadata/model_settings.config").decode()
+            ms_patched = fixup_model_settings(ms_raw, min_slots=min_slots)
+        except KeyError:
+            ms_patched = None
+
+        # --- Fix thumbnails ---
+        thumb_files = [
+            "Metadata/plate_1.png",
+            "Metadata/plate_no_light_1.png",
+            "Metadata/plate_1_small.png",
+        ]
+        thumbnail_overrides: dict[str, bytes] = {}
+
+        # Try to generate thumbnails from the packed G-code
+        gcode_str: str | None = None
+        for fname in thumb_files:
+            try:
+                existing = zin.read(fname)
+                if len(existing) >= _THUMB_MIN_SIZE:
+                    continue  # valid thumbnail
+            except KeyError:
+                pass
+            # Need to generate — load G-code lazily
+            if gcode_str is None:
+                try:
+                    gcode_bytes = zin.read("Metadata/plate_1.gcode")
+                    gcode_str = gcode_bytes.decode(errors="replace")
+                except KeyError:
+                    gcode_str = ""
+            if gcode_str:
+                try:
+                    from bambox.thumbnail import gcode_thumbnail
+
+                    size = 128 if "small" in fname else 256
+                    thumbnail_overrides[fname] = gcode_thumbnail(gcode_str, size, size)
+                except Exception:
+                    thumbnail_overrides[fname] = _PLACEHOLDER_PNG
+            else:
+                thumbnail_overrides[fname] = _PLACEHOLDER_PNG
+
+        # --- Rewrite the archive ---
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zout:
+            for item in zin.infolist():
+                if item.filename in thumbnail_overrides:
+                    continue  # replaced below
+                elif item.filename == "Metadata/project_settings.config" and ps is not None:
+                    zout.writestr(item, json.dumps(ps, indent=4) + "\n")
+                elif item.filename == "Metadata/model_settings.config" and ms_patched:
+                    zout.writestr(item, ms_patched)
+                else:
+                    zout.writestr(item, zin.read(item.filename))
+
+            # Write generated thumbnails
+            for fname, data in thumbnail_overrides.items():
+                zout.writestr(fname, data)
+
+            # Add project_settings if it didn't exist in the original
+            if ps is not None and ps_raw is None:
+                zout.writestr(
+                    "Metadata/project_settings.config",
+                    json.dumps(ps, indent=4) + "\n",
+                )
+
+    path.write_bytes(buf.getvalue())
 
 
 # ---------------------------------------------------------------------------

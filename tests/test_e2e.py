@@ -17,7 +17,13 @@ from pathlib import Path
 
 from bambox.assemble import assemble_gcode
 from bambox.cli import _parse_filament_args, main
-from bambox.pack import FilamentInfo, SliceInfo, pack_gcode_3mf
+from bambox.pack import (
+    FilamentInfo,
+    SliceInfo,
+    fixup_model_settings,
+    pack_gcode_3mf,
+    repack_3mf,
+)
 from bambox.templates import render_template
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -334,3 +340,221 @@ class TestCliPack:
         with zipfile.ZipFile(output) as z:
             ps = json.loads(z.read("Metadata/project_settings.config"))
             assert len(ps) > 500
+
+
+# ---------------------------------------------------------------------------
+# Helpers for repack tests
+# ---------------------------------------------------------------------------
+
+
+def _make_orca_3mf(
+    path: Path,
+    *,
+    project_settings: dict | None = None,
+    model_settings: str | None = None,
+    gcode: str = "G28\nG1 Z0.2 F1200\nG1 X10 Y10 E1 F600\n",
+    thumbnail: bytes | None = None,
+) -> None:
+    """Create a minimal OrcaSlicer-style .gcode.3mf for testing."""
+    if project_settings is None:
+        # Minimal settings with short arrays (simulates --min-save)
+        project_settings = {
+            "printer_model_id": "C12",
+            "nozzle_diameter": ["0.4"],
+            "filament_type": ["PLA"],
+            "filament_colour": ["#F2754E"],
+            "temperature_vitrification": ["45"],
+        }
+    if model_settings is None:
+        model_settings = (
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            "<config>\n"
+            "  <plate>\n"
+            '    <metadata key="plater_id" value="1"/>\n'
+            '    <metadata key="filament_maps" value="1"/>\n'
+            "  </plate>\n"
+            "</config>\n"
+        )
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("Metadata/plate_1.gcode", gcode)
+        z.writestr(
+            "Metadata/project_settings.config",
+            json.dumps(project_settings, indent=4),
+        )
+        z.writestr("Metadata/model_settings.config", model_settings)
+        z.writestr("Metadata/plate_1.png", thumbnail or b"\x89PNG tiny")
+        z.writestr("[Content_Types].xml", "<Types/>")
+
+
+# ---------------------------------------------------------------------------
+# Tests: fixup_model_settings
+# ---------------------------------------------------------------------------
+
+
+class TestFixupModelSettings:
+    def test_pads_filament_maps(self) -> None:
+        xml = (
+            "<config>\n"
+            "  <plate>\n"
+            '    <metadata key="filament_maps" value="1"/>\n'
+            "  </plate>\n"
+            "</config>"
+        )
+        result = fixup_model_settings(xml)
+        assert 'value="1 1 1 1 1"' in result
+
+    def test_pads_multi_filament_maps(self) -> None:
+        xml = '<metadata key="filament_maps" value="1 2"/>'
+        result = fixup_model_settings(xml)
+        assert 'value="1 2 2 2 2"' in result
+
+    def test_adds_missing_thumbnail_keys(self) -> None:
+        xml = (
+            '<config>\n  <plate>\n    <metadata key="plater_id" value="1"/>\n  </plate>\n</config>'
+        )
+        result = fixup_model_settings(xml)
+        assert 'key="thumbnail_file"' in result
+        assert 'key="top_file"' in result
+        assert 'key="pick_file"' in result
+        assert 'key="pattern_bbox_file"' in result
+
+    def test_preserves_existing_thumbnail_keys(self) -> None:
+        xml = (
+            "<config>\n"
+            "  <plate>\n"
+            '    <metadata key="thumbnail_file" value="custom.png"/>\n'
+            "  </plate>\n"
+            "</config>"
+        )
+        result = fixup_model_settings(xml)
+        assert result.count('key="thumbnail_file"') == 1
+        assert 'value="custom.png"' in result
+
+
+# ---------------------------------------------------------------------------
+# Tests: repack_3mf
+# ---------------------------------------------------------------------------
+
+
+class TestRepack:
+    def test_patches_existing_settings(self, tmp_path: Path) -> None:
+        """Repack without machine/filament patches existing project_settings."""
+        threemf = tmp_path / "test.gcode.3mf"
+        _make_orca_3mf(threemf)
+
+        repack_3mf(threemf)
+
+        with zipfile.ZipFile(threemf) as z:
+            ps = json.loads(z.read("Metadata/project_settings.config"))
+            # Short arrays should be padded to 5
+            assert len(ps["filament_type"]) >= 5
+            assert len(ps["filament_colour"]) >= 5
+            # BC-required keys should be added
+            assert "bbl_use_printhost" in ps
+
+    def test_regenerates_settings_from_profiles(self, tmp_path: Path) -> None:
+        """Repack with machine+filament regenerates project_settings from profiles."""
+        threemf = tmp_path / "test.gcode.3mf"
+        _make_orca_3mf(threemf)
+
+        repack_3mf(threemf, machine="p1s", filaments=["PLA"])
+
+        with zipfile.ZipFile(threemf) as z:
+            ps = json.loads(z.read("Metadata/project_settings.config"))
+            # Regenerated from profiles = 544+ keys
+            assert len(ps) > 500
+            # Arrays padded to 5
+            for key, val in ps.items():
+                if isinstance(val, list) and len(val) > 0:
+                    assert len(val) >= 5
+
+    def test_fixes_model_settings(self, tmp_path: Path) -> None:
+        """Repack pads filament_maps and adds thumbnail refs in model_settings."""
+        threemf = tmp_path / "test.gcode.3mf"
+        _make_orca_3mf(threemf)
+
+        repack_3mf(threemf)
+
+        with zipfile.ZipFile(threemf) as z:
+            ms = z.read("Metadata/model_settings.config").decode()
+            assert 'value="1 1 1 1 1"' in ms
+            assert 'key="thumbnail_file"' in ms
+
+    def test_regenerates_broken_thumbnails(self, tmp_path: Path) -> None:
+        """Repack regenerates thumbnails that are too small (broken)."""
+        threemf = tmp_path / "test.gcode.3mf"
+        # Tiny thumbnail simulates headless OrcaSlicer output
+        _make_orca_3mf(threemf, thumbnail=b"\x89PNG tiny")
+
+        repack_3mf(threemf)
+
+        with zipfile.ZipFile(threemf) as z:
+            png = z.read("Metadata/plate_1.png")
+            # Should be replaced — either a real thumbnail or placeholder
+            assert png != b"\x89PNG tiny"
+
+    def test_preserves_valid_thumbnails(self, tmp_path: Path) -> None:
+        """Repack keeps thumbnails that are large enough."""
+        valid_png = b"\x89PNG" + b"\x00" * 2000  # > 1024 bytes
+        threemf = tmp_path / "test.gcode.3mf"
+        _make_orca_3mf(threemf, thumbnail=valid_png)
+
+        repack_3mf(threemf)
+
+        with zipfile.ZipFile(threemf) as z:
+            png = z.read("Metadata/plate_1.png")
+            assert png == valid_png
+
+    def test_preserves_other_files(self, tmp_path: Path) -> None:
+        """Repack preserves files it doesn't touch."""
+        threemf = tmp_path / "test.gcode.3mf"
+        _make_orca_3mf(threemf)
+
+        repack_3mf(threemf)
+
+        with zipfile.ZipFile(threemf) as z:
+            assert "[Content_Types].xml" in z.namelist()
+            gcode = z.read("Metadata/plate_1.gcode").decode()
+            assert "G28" in gcode
+
+    def test_multi_filament_regeneration(self, tmp_path: Path) -> None:
+        """Repack with multiple filaments gets correct colors."""
+        threemf = tmp_path / "test.gcode.3mf"
+        _make_orca_3mf(threemf)
+
+        repack_3mf(
+            threemf,
+            machine="p1s",
+            filaments=["PETG-CF", "PLA"],
+            filament_colors=["#2850E0", "#FF0000"],
+        )
+
+        with zipfile.ZipFile(threemf) as z:
+            ps = json.loads(z.read("Metadata/project_settings.config"))
+            assert ps["filament_colour"][0] == "#2850E0"
+            assert ps["filament_colour"][1] == "#FF0000"
+
+
+class TestCliRepack:
+    def test_repack_patches_in_place(self, tmp_path: Path) -> None:
+        """CLI repack should modify the archive in-place."""
+        threemf = tmp_path / "test.gcode.3mf"
+        _make_orca_3mf(threemf)
+
+        main(["repack", str(threemf)])
+
+        with zipfile.ZipFile(threemf) as z:
+            ps = json.loads(z.read("Metadata/project_settings.config"))
+            assert len(ps["filament_type"]) >= 5
+
+    def test_repack_with_filament_regenerates(self, tmp_path: Path) -> None:
+        """CLI repack with -f regenerates from profiles."""
+        threemf = tmp_path / "test.gcode.3mf"
+        _make_orca_3mf(threemf)
+
+        main(["repack", str(threemf), "-f", "PLA:#FF0000"])
+
+        with zipfile.ZipFile(threemf) as z:
+            ps = json.loads(z.read("Metadata/project_settings.config"))
+            assert len(ps) > 500
+            assert ps["filament_colour"][0] == "#FF0000"

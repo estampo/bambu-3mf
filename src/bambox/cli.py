@@ -8,7 +8,7 @@ import logging
 import sys
 from pathlib import Path
 
-from bambox.pack import FilamentInfo, SliceInfo, pack_gcode_3mf
+from bambox.pack import FilamentInfo, SliceInfo, pack_gcode_3mf, repack_3mf
 from bambox.settings import available_filaments, available_machines, build_project_settings
 
 
@@ -71,6 +71,31 @@ def _cmd_pack(args: argparse.Namespace) -> None:
 
     pack_gcode_3mf(gcode, output, slice_info=info, project_settings=project_settings)
     print(f"Wrote {output} ({output.stat().st_size} bytes)")
+
+
+def _cmd_repack(args: argparse.Namespace) -> None:
+    """Fix up an existing .gcode.3mf for Bambu Connect."""
+    if not args.threemf.exists():
+        print(f"Error: {args.threemf} not found", file=sys.stderr)
+        sys.exit(1)
+
+    filaments_parsed = _parse_filament_args(args.filament) if args.filament else None
+    filament_types = [f[0] for f in filaments_parsed] if filaments_parsed else None
+    filament_colors = [f[1] for f in filaments_parsed] if filaments_parsed else None
+    machine = args.machine if filament_types else None
+
+    try:
+        repack_3mf(
+            args.threemf,
+            machine=machine,
+            filaments=filament_types,
+            filament_colors=filament_colors,
+        )
+    except (ValueError, KeyError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"Repacked {args.threemf} ({args.threemf.stat().st_size} bytes)")
 
 
 def _cmd_print(args: argparse.Namespace) -> None:
@@ -219,6 +244,23 @@ def main(argv: list[str] | None = None) -> None:
     pack_p.add_argument("--printer-model-id", default="")
     pack_p.add_argument("--nozzle-diameter", type=float, default=0.4)
 
+    # --- repack subcommand ---
+    repack_p = sub.add_parser("repack", help="Fix up existing .gcode.3mf for Bambu Connect")
+    repack_p.add_argument("threemf", type=Path, help="Input .gcode.3mf file (modified in-place)")
+    repack_p.add_argument(
+        "-m",
+        "--machine",
+        default="p1s",
+        help=f"Machine profile for settings regeneration ({', '.join(available_machines())})",
+    )
+    repack_p.add_argument(
+        "-f",
+        "--filament",
+        action="append",
+        metavar="TYPE[:COLOR]",
+        help="Filament type to regenerate settings (omit to patch existing settings only)",
+    )
+
     # --- print subcommand ---
     print_p = sub.add_parser("print", help="Send .gcode.3mf to printer via cloud bridge")
     print_p.add_argument("threemf", type=Path, help="Input .gcode.3mf file")
@@ -256,6 +298,8 @@ def main(argv: list[str] | None = None) -> None:
 
     if args.command == "pack":
         _cmd_pack(args)
+    elif args.command == "repack":
+        _cmd_repack(args)
     elif args.command == "print":
         _cmd_print(args)
     elif args.command == "status":
