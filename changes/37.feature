@@ -1,1 +1,1 @@
-Bridge binary auto-fetches Bambu networking library on first run; standalone use without Docker
+Bridge runner tries local ``bambox-bridge`` binary before falling back to Docker.

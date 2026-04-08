@@ -1,8 +1,9 @@
-"""Cloud printing via the Bambu cloud bridge Docker image.
+"""Cloud printing via the Bambu cloud bridge.
 
-Wraps the estampo/cloud-bridge Docker container to send prints, query status,
-and manage AMS tray mapping. No dependency on the estampo package — this module
-is self-contained for standalone bambox usage.
+Wraps the ``bambox-bridge`` binary (preferred) or falls back to the
+``estampo/cloud-bridge`` Docker container for sending prints, querying status,
+and managing AMS tray mapping.  No dependency on the estampo package — this
+module is self-contained for standalone bambox usage.
 """
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ import io
 import json
 import logging
 import os
+import shutil
 import subprocess
 import tempfile
 import tomllib
@@ -68,11 +70,62 @@ def _write_token_json(cloud: dict[str, str], directory: Path | None = None) -> P
 
 
 # ---------------------------------------------------------------------------
-# Docker bridge runner
+# Bridge runner — local binary first, then Docker fallback
 # ---------------------------------------------------------------------------
 
 
+def _find_local_bridge() -> str | None:
+    """Return path to a local ``bambox-bridge`` binary, or *None*."""
+    found = shutil.which("bambox-bridge")
+    if found:
+        return found
+    # Check common install locations
+    candidates = [
+        Path.home() / ".local" / "bin" / "bambox-bridge",
+        Path("/usr/local/bin/bambox-bridge"),
+    ]
+    for p in candidates:
+        if p.is_file() and os.access(p, os.X_OK):
+            return str(p)
+    return None
+
+
 def _run_bridge(
+    args: list[str],
+    *,
+    timeout: int = 300,
+    verbose: bool = False,
+) -> subprocess.CompletedProcess[str]:
+    """Run the cloud bridge, trying local binary first then Docker.
+
+    1. Local ``bambox-bridge`` binary (no Docker overhead)
+    2. Docker bind-mount mode
+    3. Docker baked-image fallback (for sandboxed environments)
+    """
+    local = _find_local_bridge()
+    if local:
+        return _run_bridge_local(local, args, timeout=timeout, verbose=verbose)
+
+    log.debug("No local bambox-bridge found, falling back to Docker")
+    return _run_bridge_docker(args, timeout=timeout, verbose=verbose)
+
+
+def _run_bridge_local(
+    binary: str,
+    args: list[str],
+    *,
+    timeout: int = 300,
+    verbose: bool = False,
+) -> subprocess.CompletedProcess[str]:
+    """Run the bridge via a local binary."""
+    cmd = [binary, *args]
+    if verbose:
+        cmd.append("-v")
+    log.debug("Running (local): %s", " ".join(cmd))
+    return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+
+
+def _run_bridge_docker(
     args: list[str],
     *,
     timeout: int = 300,
@@ -85,12 +138,19 @@ def _run_bridge(
     where overlay filesystems break bind mounts), falls back to building a
     temporary Docker image that ``COPY``s the input files.
     """
+    install_hint = (
+        "Install the bridge: curl -fsSL "
+        "https://github.com/estampo/bambox/releases/latest"
+        "/download/install.sh | sh"
+    )
     try:
         docker_info = subprocess.run(["docker", "info"], capture_output=True, timeout=10)
     except FileNotFoundError:
-        raise RuntimeError("Docker is required but not installed.") from None
+        raise RuntimeError(
+            f"bambox-bridge not found and Docker is not installed.\n{install_hint}"
+        ) from None
     if docker_info.returncode != 0:
-        raise RuntimeError("Docker is not running.")
+        raise RuntimeError(f"bambox-bridge not found and Docker is not running.\n{install_hint}")
 
     # Collect local file paths for potential bake fallback
     file_args: dict[str, str] = {}  # host_path -> container_path
