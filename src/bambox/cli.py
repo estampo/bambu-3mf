@@ -149,9 +149,15 @@ def _cmd_pack(args: argparse.Namespace) -> None:
     # If BAMBOX_ASSEMBLE=true, render start/end templates and wrap toolpath
     if headers.get("ASSEMBLE") == "true":
         from bambox.assemble import assemble_gcode
+        from bambox.gcode_compat import rewrite_tool_changes
         from bambox.templates import render_template
 
         toolpath = strip_bambox_header(gcode_str)
+
+        # Rewrite T0/T1/... tool changes to M620/M621 sequences
+        if len(filament_types) > 1:
+            toolpath = rewrite_tool_changes(toolpath, project_settings, machine)
+
         ctx = build_template_context(headers, project_settings)
         start = render_template(f"{machine}_start.gcode.j2", ctx)
         end = render_template(f"{machine}_end.gcode.j2", ctx)

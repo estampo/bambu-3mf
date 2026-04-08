@@ -268,6 +268,35 @@ class TestPackWithBamboxHeaders:
             assert ps["filament_type"][0] == "PLA"
             assert ps["filament_type"][1] == "PETG-CF"
 
+    def test_multi_filament_assembly_rewrites_tool_changes(self, tmp_path: Path) -> None:
+        """Multi-filament assembly should rewrite T commands to M620/M621."""
+        gcode_file = tmp_path / "multi_tool.gcode"
+        gcode_file.write_text(
+            "; BAMBOX_PRINTER=p1s\n"
+            "; BAMBOX_FILAMENT_TYPE=PLA\n"
+            "; BAMBOX_FILAMENT_TYPE=PETG-CF\n"
+            "; BAMBOX_ASSEMBLE=true\n"
+            "; BAMBOX_BED_TEMP=60\n"
+            "; BAMBOX_NOZZLE_TEMP=220\n"
+            "; BAMBOX_END\n"
+            "G1 Z0.2 F1200\n"
+            "G1 X10 Y10 E1 F600\n"
+            "T1\n"
+            "G1 X20 Y20 E2 F600\n"
+        )
+        output = tmp_path / "multi_tool.gcode.3mf"
+
+        main(["pack", str(gcode_file), "-o", str(output)])
+
+        with zipfile.ZipFile(output) as z:
+            gcode = z.read("Metadata/plate_1.gcode").decode()
+            # T1 should be wrapped in M620/M621 sequence
+            assert "M620 S1A" in gcode
+            assert "M621 S1A" in gcode
+            # Original toolpath preserved
+            assert "G1 X10 Y10 E1" in gcode
+            assert "G1 X20 Y20 E2" in gcode
+
     def test_slot_mapping_from_cli(self, tmp_path: Path) -> None:
         """bambox pack -f 3:PETG-CF places filament in slot 3."""
         gcode_file = tmp_path / "slot.gcode"

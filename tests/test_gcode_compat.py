@@ -2,8 +2,10 @@
 
 from bambox.gcode_compat import (
     _build_header_block,
+    _compute_flush_lengths,
     _parse_prusa_time,
     is_bbl_gcode,
+    rewrite_tool_changes,
     translate_to_bbl,
 )
 
@@ -282,3 +284,127 @@ def test_pack_no_double_translate(tmp_path):
         inner = z.read("Metadata/plate_1.gcode").decode()
         # Should appear exactly once
         assert inner.count("; HEADER_BLOCK_START") == 1
+
+
+# --- rewrite_tool_changes ---
+
+
+MULTI_TOOL_GCODE = (
+    "G28\nG1 Z0.2 F3000\nG1 X10 Y10 E1 F600\nT1\nG1 X20 Y20 E2 F600\nT0\nG1 X30 Y30 E3 F600\n"
+)
+
+BASIC_SETTINGS: dict[str, object] = {
+    "nozzle_temperature": ["220", "260"],
+    "filament_max_volumetric_speed": ["12", "15"],
+    "retract_length_toolchange": ["2", "2"],
+    "z_hop_types": ["0", "0", "0", "0", "0"],
+    "long_retractions_when_cut": ["0", "0", "0", "0", "0"],
+    "retraction_distances_when_cut": ["18", "18", "18", "18", "18"],
+    "nozzle_temperature_range_high": ["240", "280", "240", "240", "240"],
+    "filament_type": ["PLA", "PETG-CF", "PLA", "PLA", "PLA"],
+    "default_acceleration": "10000",
+    "initial_layer_acceleration": "500",
+    "initial_layer_print_height": "0.2",
+    "flush_volumes_matrix": [
+        "0",
+        "280",
+        "280",
+        "280",
+        "280",
+        "0",
+        "280",
+        "280",
+        "280",
+        "280",
+        "0",
+        "280",
+        "280",
+        "280",
+        "280",
+        "0",
+    ],
+    "flush_multiplier": "0.3",
+}
+
+
+def test_rewrite_replaces_t_commands():
+    """T commands should be replaced with M620/M621 sequences."""
+    result = rewrite_tool_changes(MULTI_TOOL_GCODE, BASIC_SETTINGS)
+    # M620/M621 sequences should be present (wrapping the T commands)
+    assert "M620 S1A" in result  # first tool change to T1
+    assert "M621 S1A" in result
+    assert "M620 S0A" in result  # second tool change back to T0
+    assert "M621 S0A" in result
+    # The output should be significantly larger than input (toolchange templates added)
+    assert len(result) > len(MULTI_TOOL_GCODE) * 5
+
+
+def test_rewrite_preserves_original_gcode():
+    """Original movement commands should be preserved."""
+    result = rewrite_tool_changes(MULTI_TOOL_GCODE, BASIC_SETTINGS)
+    assert "G1 X10 Y10 E1 F600" in result
+    assert "G1 X20 Y20 E2 F600" in result
+    assert "G1 X30 Y30 E3 F600" in result
+
+
+def test_rewrite_no_tool_changes():
+    """G-code with no T commands should be returned unchanged."""
+    gcode = "G28\nG1 Z0.2 F3000\nG1 X10 Y10 E1 F600\n"
+    result = rewrite_tool_changes(gcode, BASIC_SETTINGS)
+    assert result == gcode
+
+
+def test_rewrite_skips_t255():
+    """T255 (AMS retract) should not be rewritten."""
+    gcode = "G28\nT255\nG1 X10 Y10\n"
+    result = rewrite_tool_changes(gcode, BASIC_SETTINGS)
+    assert "T255" in result
+    assert "M620" not in result
+
+
+def test_rewrite_two_changes_have_correct_extruders():
+    """First change: 0→1, second change: 1→0."""
+    result = rewrite_tool_changes(MULTI_TOOL_GCODE, BASIC_SETTINGS)
+    # The M620/M621 commands should reference the correct extruder
+    m620_matches = list(__import__("re").finditer(r"M620 S(\d+)A", result))
+    assert len(m620_matches) == 2
+    assert m620_matches[0].group(1) == "1"  # first change: switch TO 1
+    assert m620_matches[1].group(1) == "0"  # second change: switch TO 0
+
+
+def test_rewrite_uses_temperatures_from_settings():
+    """Rendered toolchange should reference filament temperatures."""
+    result = rewrite_tool_changes(MULTI_TOOL_GCODE, BASIC_SETTINGS)
+    # The toolchange template uses nozzle_temperature_range_high for flush temp
+    # For first change (→extruder 1), should see 280 (PETG-CF range high)
+    assert "280" in result
+
+
+def test_compute_flush_lengths_from_matrix():
+    """Flush lengths should be computed from flush_volumes_matrix * multiplier."""
+    fl1, fl2, fl3, fl4 = _compute_flush_lengths(BASIC_SETTINGS, 0, 1)
+    total = fl1 + fl2 + fl3 + fl4
+    # 280 * 0.3 = 84 mm³ / ~2.405 mm² ≈ 34.9 mm total
+    assert 34.0 < total < 36.0
+    # Same-filament transition should have zero flush
+    fl1z, fl2z, fl3z, fl4z = _compute_flush_lengths(BASIC_SETTINGS, 0, 0)
+    assert fl1z + fl2z + fl3z + fl4z == 0.0
+
+
+def test_compute_flush_lengths_defaults_without_matrix():
+    """Without a matrix, should fall back to default 280 mm³."""
+    settings: dict[str, object] = {}
+    fl1, fl2, fl3, fl4 = _compute_flush_lengths(settings, 0, 1)
+    total = fl1 + fl2 + fl3 + fl4
+    # 280 * 0.3 = 84 mm³ / ~2.405 mm² ≈ 34.9 mm
+    assert 34.0 < total < 36.0
+
+
+def test_rewrite_detects_initial_extruder():
+    """If G-code starts with T1 before the first tool change, previous_ext should be 1."""
+    gcode = "G28\nT1\nG1 Z0.2 F3000\nG1 X10 Y10 E1 F600\nT0\nG1 X20 Y20 E2 F600\n"
+    result = rewrite_tool_changes(gcode, BASIC_SETTINGS)
+    # Only one tool change (T0), so only one M620/M621 pair
+    m620_matches = list(__import__("re").finditer(r"M620 S(\d+)A", result))
+    assert len(m620_matches) == 1
+    assert m620_matches[0].group(1) == "0"  # switching TO 0 (from 1)
