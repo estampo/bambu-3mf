@@ -105,6 +105,18 @@ async fn ensure_cert(cache: &Path) {
     }
 }
 
+/// OS type string for the Bambu API `X-BBL-OS-Type` header.
+fn bbl_os_type() -> &'static str {
+    #[cfg(target_os = "linux")]
+    { "linux" }
+    #[cfg(target_os = "macos")]
+    { "macos" }
+    #[cfg(target_os = "windows")]
+    { "windows" }
+    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+    { "linux" }
+}
+
 /// Download the library from Bambu's CDN and extract the .so/.dylib.
 async fn download_library(cache: &Path, plugin_version: &str) -> Result<String, String> {
     // Step 1: Query the slicer resource API for the CDN URL.
@@ -114,13 +126,14 @@ async fn download_library(cache: &Path, plugin_version: &str) -> Result<String, 
     );
 
     let client = reqwest::Client::builder()
-        .user_agent("bambu-bridge/0.1")
+        .user_agent(format!("BambuStudio/{}", plugin_version))
         .build()
         .map_err(|e| format!("HTTP client error: {e}"))?;
 
-    tracing::debug!(url = %api_url, "querying plugin resource API");
+    tracing::debug!(url = %api_url, os_type = bbl_os_type(), "querying plugin resource API");
     let resp = client
         .get(&api_url)
+        .header("X-BBL-OS-Type", bbl_os_type())
         .send()
         .await
         .map_err(|e| format!("API request failed: {e}"))?;

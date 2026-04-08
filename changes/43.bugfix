@@ -1,0 +1,1 @@
+Fix platform detection in auto-fetch: send correct X-BBL-OS-Type header to Bambu API

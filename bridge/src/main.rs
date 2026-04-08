@@ -20,6 +20,14 @@ use clap::{Parser, Subcommand};
 
 use agent::{BambuAgent, Credentials};
 
+/// Default credentials path: `~/.config/estampo/credentials.toml`
+fn default_credentials_path() -> PathBuf {
+    dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("estampo")
+        .join("credentials.toml")
+}
+
 #[derive(Parser)]
 #[command(name = "bambu-bridge", about = "Bambu Lab printer bridge")]
 struct Cli {
@@ -33,6 +41,10 @@ struct Cli {
         default_value_t = fetch::default_lib_path(),
     )]
     lib_path: String,
+
+    /// Path to credentials file (TOML or JSON)
+    #[arg(long, short, global = true, env = "BAMBU_CREDENTIALS")]
+    credentials: Option<PathBuf>,
 
     /// Disable auto-download of the networking library
     #[arg(long, global = true)]
@@ -51,22 +63,16 @@ struct Cli {
 enum Command {
     /// Query live printer state via MQTT (JSON output)
     Status {
-        /// Bambu device ID
-        device_id: String,
-        /// Path to token JSON file or credentials TOML
-        credentials: PathBuf,
+        /// Bambu device ID (omit to show all printers)
+        device_id: Option<String>,
     },
     /// Long-lived mode: login once, accept commands on stdin
     Watch {
         /// Bambu device ID
         device_id: String,
-        /// Path to token JSON file or credentials TOML
-        credentials: PathBuf,
     },
     /// Start HTTP API daemon on localhost
     Daemon {
-        /// Path to token JSON file or credentials TOML
-        credentials: PathBuf,
         /// Port to listen on
         #[arg(short, long, default_value = "8765")]
         port: u16,
@@ -109,6 +115,22 @@ fn fast_exit(code: i32) -> ! {
     unsafe { libc::_exit(code) }
 }
 
+/// Resolve the credentials path: explicit flag > env var > default location.
+fn resolve_credentials_path(explicit: &Option<PathBuf>) -> PathBuf {
+    if let Some(p) = explicit {
+        return p.clone();
+    }
+    let default = default_credentials_path();
+    if default.is_file() {
+        return default;
+    }
+    eprintln!(
+        "error: no credentials file found. Pass --credentials or create {}",
+        default_credentials_path().display()
+    );
+    process::exit(1);
+}
+
 fn load_credentials(path: &PathBuf) -> Credentials {
     if let Some(ext) = path.extension() {
         if ext == "toml" {
@@ -137,6 +159,30 @@ fn load_credentials(path: &PathBuf) -> Credentials {
     }
 }
 
+/// Load printer entries from a TOML credentials file.
+/// Returns a list of (name, serial) pairs from `[printers.*]` sections.
+fn load_printers_from_toml(path: &PathBuf) -> Vec<(String, String)> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(t) => t,
+        Err(_) => return Vec::new(),
+    };
+    let doc: toml::Value = match text.parse() {
+        Ok(v) => v,
+        Err(_) => return Vec::new(),
+    };
+    let printers = match doc.get("printers").and_then(|p| p.as_table()) {
+        Some(t) => t,
+        None => return Vec::new(),
+    };
+    printers
+        .iter()
+        .filter_map(|(name, val)| {
+            let serial = val.get("serial")?.as_str()?;
+            Some((name.clone(), serial.to_string()))
+        })
+        .collect()
+}
+
 fn init_agent(lib_path: &str, creds: &Credentials) -> BambuAgent {
     let agent = match BambuAgent::new(lib_path) {
         Ok(a) => a,
@@ -155,26 +201,6 @@ fn init_agent(lib_path: &str, creds: &Credentials) -> BambuAgent {
 /// Find the best (largest, most complete) message from a set.
 fn best_message(messages: &[callbacks::MqttMessage]) -> Option<&callbacks::MqttMessage> {
     messages.iter().max_by_key(|m| m.payload.len())
-}
-
-fn cmd_status(agent: &BambuAgent, device_id: &str) {
-    if let Err(e) = agent.subscribe_and_pushall(device_id, Duration::from_secs(10)) {
-        eprintln!("error: {e}");
-        process::exit(1);
-    }
-
-    let messages = agent.drain_messages();
-    restore_stdout();
-
-    match best_message(&messages) {
-        Some(msg) => {
-            println!("{}", msg.payload);
-        }
-        None => {
-            eprintln!("error: no status received from printer {device_id}");
-            fast_exit(2);
-        }
-    }
 }
 
 fn cmd_watch(agent: &BambuAgent, device_id: &str) {
@@ -282,38 +308,79 @@ async fn main() {
             }
         };
 
+    let creds_path = resolve_credentials_path(&cli.credentials);
+
     match &cli.command {
-        Command::Status {
-            device_id,
-            credentials,
-        } => {
+        Command::Status { device_id } => {
+            // If no device_id, list all printers from credentials
+            let device_ids: Vec<(String, String)> = match device_id {
+                Some(id) => vec![("".to_string(), id.clone())],
+                None => {
+                    let printers = load_printers_from_toml(&creds_path);
+                    if printers.is_empty() {
+                        eprintln!("error: no device_id provided and no [printers.*] sections in credentials");
+                        process::exit(1);
+                    }
+                    printers
+                }
+            };
+
             suppress_stdout();
-            let creds = load_credentials(credentials);
+            let creds = load_credentials(&creds_path);
             let agent = init_agent(&lib_path, &creds);
-            cmd_status(&agent, device_id);
+
+            let mut results = Vec::new();
+            for (name, dev_id) in &device_ids {
+                if let Err(e) =
+                    agent.subscribe_and_pushall(dev_id, Duration::from_secs(10))
+                {
+                    restore_stdout();
+                    eprintln!("error: {e}");
+                    fast_exit(1);
+                }
+                let messages = agent.drain_messages();
+                if let Some(msg) = best_message(&messages) {
+                    let mut val: serde_json::Value =
+                        serde_json::from_str(&msg.payload).unwrap_or_else(|_| {
+                            serde_json::json!({"raw": msg.payload})
+                        });
+                    if !name.is_empty() {
+                        val["_printer_name"] = serde_json::json!(name);
+                    }
+                    val["_device_id"] = serde_json::json!(dev_id);
+                    results.push(val);
+                } else {
+                    results.push(serde_json::json!({
+                        "_device_id": dev_id,
+                        "_printer_name": name,
+                        "error": "no status received"
+                    }));
+                }
+            }
+
+            restore_stdout();
+            if results.len() == 1 {
+                println!("{}", serde_json::to_string(&results[0]).unwrap());
+            } else {
+                println!("{}", serde_json::to_string(&results).unwrap());
+            }
             fast_exit(0);
         }
-        Command::Watch {
-            device_id,
-            credentials,
-        } => {
+        Command::Watch { device_id } => {
             suppress_stdout();
-            let creds = load_credentials(credentials);
+            let creds = load_credentials(&creds_path);
             let agent = init_agent(&lib_path, &creds);
             cmd_watch(&agent, device_id);
             fast_exit(0);
         }
-        Command::Daemon {
-            credentials,
-            port,
-            bind,
-        } => {
+        Command::Daemon { port, bind } => {
+            let printers = load_printers_from_toml(&creds_path);
             suppress_stdout();
-            let creds = load_credentials(credentials);
+            let creds = load_credentials(&creds_path);
             let agent = init_agent(&lib_path, &creds);
             restore_stdout();
 
-            let state = server::AppState::new(agent);
+            let state = server::AppState::new(agent, printers);
             let app = server::router(state);
 
             let addr: SocketAddr = format!("{bind}:{port}")
