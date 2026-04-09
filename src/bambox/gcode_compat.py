@@ -26,6 +26,7 @@ from bisect import bisect_right
 log = logging.getLogger(__name__)
 
 _FILAMENT_DIAMETER = 1.75  # mm — standard; change to 2.85 for bowden setups
+_FILAMENT_AREA = math.pi * (_FILAMENT_DIAMETER / 2.0) ** 2  # ≈ 2.4053 mm²
 _DEFAULT_FLUSH_VOLUME = 280.0  # mm³ — BambuStudio default per-transition volume
 
 
@@ -370,9 +371,13 @@ def rewrite_tool_changes(
             # Temperature
             "old_filament_temp": _int("nozzle_temperature", previous_ext, 220),
             "new_filament_temp": _int("nozzle_temperature", next_ext, 220),
-            # Feedrates
-            "old_filament_e_feedrate": _int("filament_max_volumetric_speed", previous_ext, 12),
-            "new_filament_e_feedrate": _int("filament_max_volumetric_speed", next_ext, 12),
+            # Feedrates — convert volumetric speed (mm³/s) to linear (mm/min)
+            "old_filament_e_feedrate": round(
+                _num("filament_max_volumetric_speed", previous_ext, 12) / _FILAMENT_AREA * 60
+            ),
+            "new_filament_e_feedrate": round(
+                _num("filament_max_volumetric_speed", next_ext, 12) / _FILAMENT_AREA * 60
+            ),
             # Retraction
             "old_retract_length_toolchange": _num("retract_length_toolchange", previous_ext, 2.0),
             "new_retract_length_toolchange": _num("retract_length_toolchange", next_ext, 2.0),

@@ -17,6 +17,7 @@ from pathlib import Path
 
 from bambox.assemble import assemble_gcode
 from bambox.cli import _parse_filament_args, main
+from bambox.gcode_compat import _FILAMENT_AREA
 from bambox.pack import (
     FilamentInfo,
     SliceInfo,
@@ -73,6 +74,7 @@ P1S_CONTEXT = {
     "filament_max_volumetric_speed": [12],
     "nozzle_temperature_range_high": [240],
     "max_layer_z": 0.4,
+    "filament_area": _FILAMENT_AREA,
 }
 
 

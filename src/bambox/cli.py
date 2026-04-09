@@ -8,7 +8,13 @@ import logging
 import sys
 from pathlib import Path
 
-from bambox.cura import build_template_context, parse_bambox_headers, strip_bambox_header
+from bambox.cura import (
+    PRINTER_MODEL_IDS,
+    build_template_context,
+    extract_slice_stats,
+    parse_bambox_headers,
+    strip_bambox_header,
+)
 from bambox.pack import FilamentInfo, SliceInfo, pack_gcode_3mf, repack_3mf
 from bambox.settings import available_filaments, available_machines, build_project_settings
 
@@ -110,14 +116,23 @@ def _cmd_pack(args: argparse.Namespace) -> None:
     else:
         machine = args.machine
 
-    if "FILAMENT_TYPE" in headers:
-        # Headers provide filament types (comma-separated for multi-filament)
-        header_types = headers["FILAMENT_TYPE"].split(",")
-        header_slots = headers["FILAMENT_SLOT"].split(",") if "FILAMENT_SLOT" in headers else []
+    if "FILAMENT_SLOT" in headers:
+        # Per-extruder headers from CuraEngine. FILAMENT_TYPE may be empty
+        # when CuraEngine CLI fails to substitute {material_type}.
+        header_slots = headers["FILAMENT_SLOT"].split(",")
+        header_types = headers["FILAMENT_TYPE"].split(",") if "FILAMENT_TYPE" in headers else []
         parsed_filaments: list[tuple[int | None, str, str]] = []
-        for i, t in enumerate(header_types):
-            slot = int(header_slots[i]) if i < len(header_slots) else None
-            parsed_filaments.append((slot, t.strip().upper(), "#F2754E"))
+        for i, slot_str in enumerate(header_slots):
+            ftype = header_types[i].strip().upper() if i < len(header_types) else ""
+            if not ftype:
+                ftype = "PLA"  # default when CuraEngine doesn't substitute
+            parsed_filaments.append((int(slot_str), ftype, "#F2754E"))
+        assigned = _assign_filament_slots(parsed_filaments)
+    elif "FILAMENT_TYPE" in headers:
+        header_types = headers["FILAMENT_TYPE"].split(",")
+        parsed_filaments = []
+        for t in header_types:
+            parsed_filaments.append((None, t.strip().upper() or "PLA", "#F2754E"))
         assigned = _assign_filament_slots(parsed_filaments)
     else:
         assigned = _assign_filament_slots(_parse_filament_args(args.filament))
@@ -134,9 +149,19 @@ def _cmd_pack(args: argparse.Namespace) -> None:
         for slot, ftype, color in assigned
     ]
 
+    # Auto-derive printer_model_id from BAMBOX_PRINTER header if not set via CLI
+    printer_model_id = args.printer_model_id
+    if not printer_model_id and "PRINTER" in headers:
+        printer_model_id = PRINTER_MODEL_IDS.get(headers["PRINTER"].lower(), "")
+
+    # Extract print time and filament weight from slicer G-code comments
+    stats = extract_slice_stats(gcode_str)
+
     info = SliceInfo(
-        printer_model_id=args.printer_model_id,
+        printer_model_id=printer_model_id,
         nozzle_diameter=args.nozzle_diameter,
+        prediction=stats.prediction,
+        weight=stats.weight,
         filaments=filament_infos,
     )
 

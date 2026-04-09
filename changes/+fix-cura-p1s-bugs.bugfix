@@ -1,0 +1,1 @@
+Fix CuraEngine P1S packaging: feedrate conversion (#96), multi-filament detection (#97), printer_model_id (#98), slice statistics (#99), template array-as-scalar (#100)
