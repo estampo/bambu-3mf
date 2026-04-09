@@ -105,7 +105,7 @@ def _cmd_pack(args: argparse.Namespace) -> None:
     else:
         machine = args.machine
 
-    if "FILAMENT_TYPE" in headers and not args.filament:
+    if "FILAMENT_TYPE" in headers:
         # Headers provide filament types (comma-separated for multi-filament)
         header_types = headers["FILAMENT_TYPE"].split(",")
         header_slots = headers["FILAMENT_SLOT"].split(",") if "FILAMENT_SLOT" in headers else []
