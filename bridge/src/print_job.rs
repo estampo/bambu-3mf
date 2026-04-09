@@ -571,4 +571,142 @@ mod tests {
         assert!(!names.contains(&"Metadata/plate_1.gcode.md5"));
         assert!(!names.contains(&"Metadata/plate_1.png"));
     }
+
+    #[test]
+    fn strip_gcode_from_3mf_invalid_zip() {
+        let result = strip_gcode_from_3mf(b"not a zip file");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("bad zip"));
+    }
+
+    #[test]
+    fn strip_gcode_from_3mf_empty_zip() {
+        // Create a valid but empty zip
+        let mut buf = Vec::new();
+        {
+            let writer = Cursor::new(&mut buf);
+            let zip = zip::ZipWriter::new(writer);
+            zip.finish().unwrap();
+        }
+        let result = strip_gcode_from_3mf(&buf).unwrap();
+        let reader = Cursor::new(&result);
+        let archive = zip::ZipArchive::new(reader).unwrap();
+        assert_eq!(archive.len(), 0);
+    }
+
+    #[test]
+    fn parse_ams_trays_integer_ids() {
+        // Some firmware sends numeric IDs rather than string IDs
+        let status = serde_json::json!({
+            "ams": {
+                "ams": [{
+                    "id": 0,
+                    "tray": [
+                        {"id": 0, "tray_type": "PLA", "tray_color": "FF0000FF", "tray_info_idx": ""},
+                    ]
+                }]
+            }
+        });
+        let trays = parse_ams_trays(&status);
+        assert_eq!(trays.len(), 1);
+        assert_eq!(trays[0].ams_id, 0);
+        assert_eq!(trays[0].slot_id, 0);
+        assert_eq!(trays[0].color, "FF0000");
+    }
+
+    #[test]
+    fn parse_ams_trays_short_color() {
+        let status = serde_json::json!({
+            "ams": {
+                "ams": [{
+                    "id": "0",
+                    "tray": [
+                        {"id": "0", "tray_type": "PLA", "tray_color": "FFF", "tray_info_idx": ""},
+                    ]
+                }]
+            }
+        });
+        let trays = parse_ams_trays(&status);
+        assert_eq!(trays.len(), 1);
+        assert_eq!(trays[0].color, "FFF"); // short color returned as-is
+    }
+
+    #[test]
+    fn parse_ams_trays_missing_tray_array() {
+        let status = serde_json::json!({
+            "ams": {
+                "ams": [{
+                    "id": "0"
+                    // no "tray" key
+                }]
+            }
+        });
+        let trays = parse_ams_trays(&status);
+        assert!(trays.is_empty());
+    }
+
+    #[test]
+    fn build_ams_mapping_empty_trays() {
+        let mapping = build_ams_mapping(b"not a zip", &[]);
+        assert!(mapping.mapping.is_empty());
+        assert!(mapping.mapping2.is_empty());
+    }
+
+    #[test]
+    fn ams_mapping2_entry_structure() {
+        let entry = AmsMapping2Entry {
+            ams_id: 1,
+            slot_id: 2,
+        };
+        let json = serde_json::to_string(&entry).unwrap();
+        assert!(json.contains("\"ams_id\":1"));
+        assert!(json.contains("\"slot_id\":2"));
+    }
+
+    #[test]
+    fn ams_tray_serialization() {
+        let tray = AmsTray {
+            phys_slot: 5,
+            ams_id: 1,
+            slot_id: 1,
+            tray_type: "PLA".into(),
+            color: "FFFFFF".into(),
+            tray_info_idx: "GFL99".into(),
+        };
+        let json = serde_json::to_string(&tray).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["phys_slot"], 5);
+        assert_eq!(parsed["type"], "PLA"); // serde rename
+        assert_eq!(parsed["color"], "FFFFFF");
+    }
+
+    #[test]
+    fn ams_tray_deserialization() {
+        let json = r#"{"phys_slot":0,"ams_id":0,"slot_id":0,"type":"ASA","color":"BCBCBC","tray_info_idx":"GFB98"}"#;
+        let tray: AmsTray = serde_json::from_str(json).unwrap();
+        assert_eq!(tray.tray_type, "ASA");
+        assert_eq!(tray.phys_slot, 0);
+    }
+
+    #[test]
+    fn phys_slot_calculation() {
+        // ams_id * 4 + slot_id
+        // Unit 0, slot 3 -> 3
+        // Unit 1, slot 0 -> 4
+        // Unit 2, slot 2 -> 10
+        let status = serde_json::json!({
+            "ams": {
+                "ams": [
+                    {"id": "0", "tray": [{"id": "3", "tray_type": "PLA", "tray_color": "000000", "tray_info_idx": ""}]},
+                    {"id": "1", "tray": [{"id": "0", "tray_type": "ABS", "tray_color": "111111", "tray_info_idx": ""}]},
+                    {"id": "2", "tray": [{"id": "2", "tray_type": "TPU", "tray_color": "222222", "tray_info_idx": ""}]},
+                ]
+            }
+        });
+        let trays = parse_ams_trays(&status);
+        assert_eq!(trays.len(), 3);
+        assert_eq!(trays[0].phys_slot, 3);
+        assert_eq!(trays[1].phys_slot, 4);
+        assert_eq!(trays[2].phys_slot, 10);
+    }
 }

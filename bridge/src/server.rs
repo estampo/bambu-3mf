@@ -734,4 +734,159 @@ mod tests {
         let resp = server.get("/ams/DEV002").await;
         resp.assert_status(StatusCode::NOT_FOUND);
     }
+
+    #[tokio::test]
+    async fn ping_returns_ok_with_pid_and_uptime() {
+        let state = mock_state(HashMap::new());
+        let app = router(state);
+        let server = axum_test::TestServer::new(app).unwrap();
+
+        let resp = server.get("/ping").await;
+        resp.assert_status_ok();
+        let body: PingResponse = resp.json();
+        assert_eq!(body.status, "ok");
+        assert!(body.pid > 0);
+        assert!(body.uptime_secs < 5);
+    }
+
+    #[tokio::test]
+    async fn health_response_has_all_fields() {
+        let state = mock_state(HashMap::new());
+        let app = router(state);
+        let server = axum_test::TestServer::new(app).unwrap();
+
+        let resp = server.get("/health").await;
+        resp.assert_status_ok();
+        let body: serde_json::Value = resp.json();
+        assert!(body.get("status").is_some());
+        assert!(body.get("pid").is_some());
+        assert!(body.get("mqtt_connected").is_some());
+        assert!(body.get("uptime_secs").is_some());
+        assert!(body.get("cached_devices").is_some());
+    }
+
+    #[tokio::test]
+    async fn health_mqtt_disconnected_by_default() {
+        let state = mock_state(HashMap::new());
+        let app = router(state);
+        let server = axum_test::TestServer::new(app).unwrap();
+
+        let resp = server.get("/health").await;
+        let body: HealthResponse = resp.json();
+        assert!(!body.mqtt_connected);
+    }
+
+    #[tokio::test]
+    async fn health_mqtt_connected_when_flag_set() {
+        let state = mock_state(HashMap::new());
+        state
+            .handle
+            .callback_state
+            .server_connected
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+
+        let app = router(state);
+        let server = axum_test::TestServer::new(app).unwrap();
+
+        let resp = server.get("/health").await;
+        let body: HealthResponse = resp.json();
+        assert!(body.mqtt_connected);
+    }
+
+    #[tokio::test]
+    async fn health_shows_multiple_cached_devices() {
+        let mut devices = HashMap::new();
+        devices.insert("DEV001".into(), sample_status());
+        devices.insert("DEV002".into(), serde_json::json!({"print": {}}));
+        devices.insert("DEV003".into(), serde_json::json!({}));
+        let state = mock_state(devices);
+        let app = router(state);
+        let server = axum_test::TestServer::new(app).unwrap();
+
+        let resp = server.get("/health").await;
+        let body: HealthResponse = resp.json();
+        assert_eq!(body.cached_devices.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn status_uncached_device_returns_error() {
+        let state = mock_state(HashMap::new());
+        let app = router(state);
+        let server = axum_test::TestServer::new(app).unwrap();
+
+        let resp = server.get("/status/UNKNOWN").await;
+        resp.assert_status(StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[tokio::test]
+    async fn printers_empty_when_none_configured() {
+        let state = mock_state(HashMap::new());
+        let app = router(state);
+        let server = axum_test::TestServer::new(app).unwrap();
+
+        let resp = server.get("/printers").await;
+        resp.assert_status_ok();
+        let body: serde_json::Value = resp.json();
+        let printers = body["printers"].as_array().unwrap();
+        assert!(printers.is_empty());
+    }
+
+    #[tokio::test]
+    async fn printers_uncached_shows_cached_false() {
+        let printers = vec![("lonely".to_string(), "DEV999".to_string())];
+        let state = mock_state_with_printers(HashMap::new(), printers);
+        let app = router(state);
+        let server = axum_test::TestServer::new(app).unwrap();
+
+        let resp = server.get("/printers").await;
+        let body: serde_json::Value = resp.json();
+        let printers = body["printers"].as_array().unwrap();
+        assert_eq!(printers.len(), 1);
+        assert_eq!(printers[0]["cached"], false);
+        assert!(printers[0].get("gcode_state").is_none());
+    }
+
+    #[tokio::test]
+    async fn cancel_fails_on_disconnected_channel() {
+        let state = mock_state(HashMap::new());
+        let app = router(state);
+        let server = axum_test::TestServer::new(app).unwrap();
+
+        let resp = server.post("/cancel/DEV001").await;
+        resp.assert_status(StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn nonexistent_route_returns_404() {
+        let state = mock_state(HashMap::new());
+        let app = router(state);
+        let server = axum_test::TestServer::new(app).unwrap();
+
+        let resp = server.get("/nonexistent").await;
+        resp.assert_status(StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn status_cached_preserves_all_fields() {
+        let status = serde_json::json!({
+            "print": {
+                "gcode_state": "IDLE",
+                "bed_temper": 25.0,
+                "nozzle_temper": 30.0,
+                "mc_percent": 0,
+            }
+        });
+        let mut devices = HashMap::new();
+        devices.insert("DEV001".into(), status);
+        let state = mock_state(devices);
+        let app = router(state);
+        let server = axum_test::TestServer::new(app).unwrap();
+
+        let resp = server.get("/status/DEV001").await;
+        resp.assert_status_ok();
+        let body: serde_json::Value = resp.json();
+        assert_eq!(body["print"]["gcode_state"], "IDLE");
+        assert_eq!(body["print"]["bed_temper"], 25.0);
+        assert_eq!(body["print"]["mc_percent"], 0);
+    }
 }

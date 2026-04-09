@@ -25,6 +25,7 @@ pub struct CallbackState {
     pub messages: Mutex<Vec<MqttMessage>>,
 }
 
+#[derive(Debug)]
 pub struct MqttMessage {
     pub dev_id: String,
     pub payload: String,
@@ -210,5 +211,131 @@ mod tests {
         let topic = CString::new("01P00A451601106").unwrap();
         on_printer_connected(topic.as_ptr(), ctx);
         assert!(s.printer_subscribed.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn cstr_to_string_null_returns_empty() {
+        let result = unsafe { cstr_to_string(std::ptr::null()) };
+        assert_eq!(result, "");
+    }
+
+    #[test]
+    fn cstr_to_string_empty_returns_empty() {
+        let s = CString::new("").unwrap();
+        let result = unsafe { cstr_to_string(s.as_ptr()) };
+        assert_eq!(result, "");
+    }
+
+    #[test]
+    fn cstr_to_string_valid_ascii() {
+        let s = CString::new("hello world").unwrap();
+        let result = unsafe { cstr_to_string(s.as_ptr()) };
+        assert_eq!(result, "hello world");
+    }
+
+    #[test]
+    fn cstr_to_string_utf8() {
+        let s = CString::new("café").unwrap();
+        let result = unsafe { cstr_to_string(s.as_ptr()) };
+        assert_eq!(result, "café");
+    }
+
+    #[test]
+    fn on_user_login_zero_login_does_not_set() {
+        let s = Box::new(CallbackState::new());
+        let ctx = &*s as *const CallbackState as *mut c_void;
+        on_user_login(1, 0, ctx); // online=1, login=0
+        assert!(!s.user_logged_in.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn on_message_stores_multiple() {
+        let s = Box::new(CallbackState::new());
+        let ctx = &*s as *const CallbackState as *mut c_void;
+        let dev = CString::new("D1").unwrap();
+        let msg1 = CString::new(r#"{"a":1}"#).unwrap();
+        let msg2 = CString::new(r#"{"b":2}"#).unwrap();
+        on_message(dev.as_ptr(), msg1.as_ptr(), ctx);
+        on_message(dev.as_ptr(), msg2.as_ptr(), ctx);
+
+        let msgs = s.drain_messages();
+        assert_eq!(msgs.len(), 2);
+        assert!(msgs[0].payload.contains("\"a\""));
+        assert!(msgs[1].payload.contains("\"b\""));
+    }
+
+    #[test]
+    fn on_message_null_dev_id_produces_empty_string() {
+        let s = Box::new(CallbackState::new());
+        let ctx = &*s as *const CallbackState as *mut c_void;
+        let msg = CString::new(r#"{"data":"ok"}"#).unwrap();
+        on_message(std::ptr::null(), msg.as_ptr(), ctx);
+
+        let msgs = s.drain_messages();
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0].dev_id, "");
+    }
+
+    #[test]
+    fn on_message_null_payload_is_empty_and_skipped() {
+        let s = Box::new(CallbackState::new());
+        let ctx = &*s as *const CallbackState as *mut c_void;
+        let dev = CString::new("DEV").unwrap();
+        on_message(dev.as_ptr(), std::ptr::null(), ctx);
+
+        // null -> empty string -> skipped
+        assert!(s.drain_messages().is_empty());
+    }
+
+    #[test]
+    fn callback_state_atomics_toggle() {
+        let s = CallbackState::new();
+        s.server_connected.store(true, Ordering::SeqCst);
+        assert!(s.server_connected.load(Ordering::SeqCst));
+        s.server_connected.store(false, Ordering::SeqCst);
+        assert!(!s.server_connected.load(Ordering::SeqCst));
+
+        s.user_logged_in.store(true, Ordering::SeqCst);
+        assert!(s.user_logged_in.load(Ordering::SeqCst));
+
+        s.printer_subscribed.store(true, Ordering::SeqCst);
+        assert!(s.printer_subscribed.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn drain_messages_is_atomic_swap() {
+        let s = CallbackState::new();
+        {
+            let mut msgs = s.messages.lock().unwrap();
+            for i in 0..100 {
+                msgs.push(MqttMessage {
+                    dev_id: format!("dev{i}"),
+                    payload: format!("msg{i}"),
+                });
+            }
+        }
+        let drained = s.drain_messages();
+        assert_eq!(drained.len(), 100);
+        // Second drain is empty
+        assert!(s.drain_messages().is_empty());
+    }
+
+    #[test]
+    fn on_http_error_does_not_panic() {
+        // Just verify it doesn't crash — it only logs
+        let s = Box::new(CallbackState::new());
+        let ctx = &*s as *const CallbackState as *mut c_void;
+        let body = CString::new("error body text").unwrap();
+        on_http_error(401, body.as_ptr(), ctx);
+        // No panic = pass
+    }
+
+    #[test]
+    fn on_subscribe_failure_does_not_panic() {
+        let s = Box::new(CallbackState::new());
+        let ctx = &*s as *const CallbackState as *mut c_void;
+        let topic = CString::new("device/01P00A/report").unwrap();
+        on_subscribe_failure(topic.as_ptr(), ctx);
+        // No panic = pass
     }
 }

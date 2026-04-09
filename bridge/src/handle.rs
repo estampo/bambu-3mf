@@ -225,3 +225,151 @@ pub fn test_handle() -> AgentHandle {
         callback_state: Arc::new(CallbackState::new()),
     }
 }
+
+/// Create a test handle with a live channel. Returns both the handle and receiver
+/// so tests can simulate agent responses.
+#[cfg(test)]
+pub fn test_handle_with_receiver() -> (AgentHandle, mpsc::Receiver<AgentCommand>) {
+    let (tx, rx) = mpsc::channel(64);
+    let handle = AgentHandle {
+        tx,
+        callback_state: Arc::new(CallbackState::new()),
+    };
+    (handle, rx)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[tokio::test]
+    async fn drain_messages_fails_when_channel_closed() {
+        let handle = test_handle();
+        let result = handle.drain_messages().await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "agent thread gone");
+    }
+
+    #[tokio::test]
+    async fn subscribe_and_pushall_fails_when_channel_closed() {
+        let handle = test_handle();
+        let result = handle
+            .subscribe_and_pushall("DEV001".into(), Duration::from_secs(1))
+            .await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "agent thread gone");
+    }
+
+    #[tokio::test]
+    async fn send_message_fails_when_channel_closed() {
+        let handle = test_handle();
+        let result = handle.send_message("DEV001".into(), "{}".into()).await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "agent thread gone");
+    }
+
+    #[tokio::test]
+    async fn start_print_fails_when_channel_closed() {
+        let handle = test_handle();
+        let req = crate::agent::PrintRequest {
+            device_id: "DEV001".into(),
+            filename: "test.3mf".into(),
+            project_name: "test".into(),
+            config_filename: None,
+            ams_mapping: None,
+            ams_mapping2: None,
+            bed_leveling: true,
+            flow_cali: true,
+            vibration_cali: true,
+            timelapse: false,
+            use_ams: true,
+        };
+        let result = handle.start_print(req).await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "agent thread gone");
+    }
+
+    #[tokio::test]
+    async fn drain_messages_error_when_reply_dropped() {
+        let (handle, mut rx) = test_handle_with_receiver();
+
+        tokio::spawn(async move {
+            if let Some(AgentCommand::DrainMessages { reply }) = rx.recv().await {
+                drop(reply);
+            }
+        });
+
+        let result = handle.drain_messages().await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "agent thread dropped reply");
+    }
+
+    #[tokio::test]
+    async fn drain_messages_succeeds_with_reply() {
+        let (handle, mut rx) = test_handle_with_receiver();
+
+        tokio::spawn(async move {
+            if let Some(AgentCommand::DrainMessages { reply }) = rx.recv().await {
+                let msgs = vec![MqttMessage {
+                    dev_id: "DEV".into(),
+                    payload: "hello".into(),
+                }];
+                let _ = reply.send(msgs);
+            }
+        });
+
+        let result = handle.drain_messages().await;
+        assert!(result.is_ok());
+        let msgs = result.unwrap();
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0].dev_id, "DEV");
+    }
+
+    #[tokio::test]
+    async fn send_message_succeeds_with_reply() {
+        let (handle, mut rx) = test_handle_with_receiver();
+
+        tokio::spawn(async move {
+            if let Some(AgentCommand::SendMessage { reply, .. }) = rx.recv().await {
+                let _ = reply.send(Ok(0));
+            }
+        });
+
+        let result = handle.send_message("DEV".into(), "{}".into()).await;
+        assert_eq!(result.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn callback_state_is_shared_via_arc() {
+        let handle = test_handle();
+        assert!(!handle
+            .callback_state
+            .server_connected
+            .load(std::sync::atomic::Ordering::SeqCst));
+
+        handle
+            .callback_state
+            .server_connected
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        assert!(handle
+            .callback_state
+            .server_connected
+            .load(std::sync::atomic::Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn cloned_handle_shares_callback_state() {
+        let handle = test_handle();
+        let handle2 = handle.clone();
+
+        handle
+            .callback_state
+            .server_connected
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        assert!(handle2
+            .callback_state
+            .server_connected
+            .load(std::sync::atomic::Ordering::SeqCst));
+    }
+}

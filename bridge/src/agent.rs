@@ -774,6 +774,100 @@ email = "user@example.com"
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(v["data"]["refresh_token"], "mytoken");
     }
+
+    #[test]
+    fn test_null_agent_construction() {
+        let agent = unsafe { BambuAgent::test_null() };
+        assert!(agent.agent_ptr().is_null());
+        assert_eq!(agent.data_dir, "/tmp/bambu_agent");
+    }
+
+    #[test]
+    fn test_null_agent_callback_state_accessible() {
+        let agent = unsafe { BambuAgent::test_null() };
+        let state = agent.callback_state();
+        assert!(!state.server_connected.load(std::sync::atomic::Ordering::SeqCst));
+        assert!(!state.user_logged_in.load(std::sync::atomic::Ordering::SeqCst));
+        assert!(!state.printer_subscribed.load(std::sync::atomic::Ordering::SeqCst));
+    }
+
+    #[test]
+    fn test_null_agent_drain_messages_empty() {
+        let agent = unsafe { BambuAgent::test_null() };
+        let msgs = agent.drain_messages();
+        assert!(msgs.is_empty());
+    }
+
+    #[test]
+    fn to_cstring_valid() {
+        let result = super::to_cstring("hello");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().to_str().unwrap(), "hello");
+    }
+
+    #[test]
+    fn to_cstring_with_null_byte_fails() {
+        let result = super::to_cstring("hello\0world");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("null byte"));
+    }
+
+    #[test]
+    fn to_cstring_empty_ok() {
+        let result = super::to_cstring("");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn print_result_serialize() {
+        let result = PrintResult {
+            result: "success".into(),
+            return_code: 0,
+            print_result: 0,
+            device_id: "DEV001".into(),
+            file: "test.3mf".into(),
+        };
+        let json = serde_json::to_string(&result).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["result"], "success");
+        assert_eq!(v["return_code"], 0);
+        assert_eq!(v["device_id"], "DEV001");
+    }
+
+    #[test]
+    fn credentials_from_toml_empty_token_fails() {
+        let dir = std::env::temp_dir().join("bambu_test_empty_tok");
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("empty_token.toml");
+        std::fs::write(
+            &path,
+            "[cloud]\ntoken = \"\"\n",
+        )
+        .unwrap();
+
+        let err = Credentials::from_toml(&path).unwrap_err();
+        assert!(err.contains("token"), "expected token error, got: {err}");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn credentials_from_toml_missing_file() {
+        let path = std::path::PathBuf::from("/tmp/nonexistent_creds_12345.toml");
+        let err = Credentials::from_toml(&path).unwrap_err();
+        assert!(err.contains("cannot read"));
+    }
+
+    #[test]
+    fn credentials_from_toml_invalid_toml() {
+        let dir = std::env::temp_dir().join("bambu_test_bad_toml");
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("bad.toml");
+        std::fs::write(&path, "not valid toml {{{").unwrap();
+
+        let err = Credentials::from_toml(&path).unwrap_err();
+        assert!(err.contains("invalid TOML"));
+        let _ = std::fs::remove_file(&path);
+    }
 }
 
 impl Drop for BambuAgent {
