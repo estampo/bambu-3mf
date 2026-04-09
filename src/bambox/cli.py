@@ -336,6 +336,13 @@ def _cmd_print(args: argparse.Namespace) -> None:
             skip_ams_mapping=args.no_ams_mapping,
             ams_trays=ams_trays or None,
         )
+
+        # Show AMS mapping if the bridge computed one
+        ams_mapping = result.get("_ams_mapping")
+        ams_trays_used = result.get("_ams_trays")
+        if ams_mapping and ams_trays_used:
+            _show_ams_mapping(threemf, ams_trays_used, ams_mapping)
+
         status = result.get("result", "unknown")
         if status in ("success", "sent"):
             print(f"Print sent successfully! ({status})")
@@ -344,6 +351,51 @@ def _cmd_print(args: argparse.Namespace) -> None:
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
+
+
+def _show_ams_mapping(
+    threemf: Path, ams_trays: list[dict], mapping: list[int]
+) -> None:
+    """Display the AMS filament mapping that will be used for the print."""
+    import xml.etree.ElementTree as ET
+    import zipfile
+
+    from bambox.bridge import _xml_ns
+
+    if not any(v >= 0 for v in mapping):
+        return
+
+    # Read filament info from slice_info for display
+    filaments: dict[int, tuple[str, str]] = {}
+    try:
+        with zipfile.ZipFile(threemf, "r") as z:
+            if "Metadata/slice_info.config" in z.namelist():
+                root = ET.fromstring(z.read("Metadata/slice_info.config"))
+                ns = _xml_ns(root)
+                plate_el = root.find(f"{ns}plate")
+                if plate_el is not None:
+                    for f in plate_el.findall(f"{ns}filament"):
+                        fid = int(f.get("id", "1"))
+                        filaments[fid] = (f.get("type", "?"), f.get("color", "?"))
+    except Exception:
+        pass
+
+    tray_by_phys = {t["phys_slot"]: t for t in ams_trays}
+
+    print("AMS filament mapping:")
+    for idx, phys_slot in enumerate(mapping):
+        filament_id = idx + 1
+        if phys_slot < 0:
+            continue
+        fil_type, fil_color = filaments.get(filament_id, ("?", "?"))
+        tray = tray_by_phys.get(phys_slot, {})
+        tray_type = tray.get("type", "?")
+        tray_color = tray.get("color", "?")
+        print(
+            f"  Slot {filament_id} ({fil_type} {fil_color}) "
+            f"-> AMS tray {phys_slot} ({tray_type} #{tray_color})"
+        )
+    print()
 
 
 def _cmd_status(args: argparse.Namespace) -> None:

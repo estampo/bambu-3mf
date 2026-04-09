@@ -596,6 +596,11 @@ def _cloud_print_impl(
         data = json.loads(result.stdout.strip())
         if result.stderr and data.get("result") not in ("success", "sent"):
             log.warning("Bridge stderr: %s", result.stderr.strip())
+        # Attach AMS mapping info for CLI display
+        if mapping:
+            data["_ams_mapping"] = mapping
+        if ams_trays:
+            data["_ams_trays"] = ams_trays
         return data
     except json.JSONDecodeError:
         raise RuntimeError(
