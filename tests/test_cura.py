@@ -11,6 +11,7 @@ from bambox.cura import (
     available_cura_printers,
     build_template_context,
     cura_definitions_dir,
+    extract_slice_stats,
     parse_bambox_headers,
     strip_bambox_header,
 )
@@ -427,3 +428,44 @@ class TestAssignFilamentSlots:
         parsed = [(0, "PETG-CF", "#F2754E"), (None, "PLA", "#F2754E")]
         result = _assign_filament_slots(parsed)
         assert result == [(0, "PETG-CF", "#F2754E"), (1, "PLA", "#F2754E")]
+
+
+class TestExtractSliceStats:
+    def test_time_from_time_header_only(self) -> None:
+        gcode = ";TIME:1234\nG1 X0\n"
+        stats = extract_slice_stats(gcode)
+        assert stats.prediction == 1234
+
+    def test_time_from_time_elapsed_only(self) -> None:
+        gcode = ";LAYER:0\nG1 X0\n;TIME_ELAPSED:500.0\n"
+        stats = extract_slice_stats(gcode)
+        assert stats.prediction == 500
+
+    def test_time_uses_max_of_time_and_elapsed(self) -> None:
+        """When ;TIME: is larger (includes start gcode time), use it."""
+        gcode = ";TIME:6666\n;LAYER:0\nG1 X0\n;TIME_ELAPSED:2799.0\n"
+        stats = extract_slice_stats(gcode)
+        assert stats.prediction == 6666
+
+    def test_time_uses_elapsed_when_larger(self) -> None:
+        """When TIME_ELAPSED is larger, use it (shouldn't normally happen)."""
+        gcode = ";TIME:100\n;LAYER:0\nG1 X0\n;TIME_ELAPSED:500.0\n"
+        stats = extract_slice_stats(gcode)
+        assert stats.prediction == 500
+
+    def test_no_time_info(self) -> None:
+        gcode = "G28\nG1 X0\n"
+        stats = extract_slice_stats(gcode)
+        assert stats.prediction == 0
+
+    def test_filament_used_parsing(self) -> None:
+        gcode = ";Filament used: 1.234m, 0.567m\n"
+        stats = extract_slice_stats(gcode)
+        assert stats.filament_used_m == [1.234, 0.567]
+        assert stats.weight > 0
+
+    def test_weight_from_e_positions(self) -> None:
+        """When Filament used is 0m, compute weight from E positions."""
+        gcode = ";Filament used: 0m\nG92 E0\nG1 X10 E5.0\nG1 X20 E10.0\n"
+        stats = extract_slice_stats(gcode)
+        assert stats.weight > 0
