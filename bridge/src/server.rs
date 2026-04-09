@@ -289,6 +289,11 @@ async fn cancel_print(
     State(state): State<SharedState>,
     Path(device_id): Path<String>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorResponse>)> {
+    // Abort any in-flight file upload first — this sets the global cancel
+    // flag that WasCancelledFn checks during the FTP transfer.
+    let upload_cancelled = state.handle.cancel_upload().await.is_ok();
+
+    // Send the MQTT stop command to halt the printer itself.
     let stop_cmd = r#"{"print":{"command":"stop","sequence_id":"0"}}"#;
     let ret = state
         .handle
@@ -312,6 +317,7 @@ async fn cancel_print(
         "command": "stop",
         "device_id": device_id,
         "sent": true,
+        "upload_cancelled": upload_cancelled,
     })))
 }
 

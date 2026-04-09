@@ -37,6 +37,9 @@ pub enum AgentCommand {
         request: PrintRequest,
         reply: oneshot::Sender<Result<PrintResult, String>>,
     },
+    CancelUpload {
+        reply: oneshot::Sender<()>,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -98,6 +101,16 @@ impl AgentHandle {
             .await
             .map_err(|_| "agent thread gone".to_string())?;
         rx.await.map_err(|_| "agent thread dropped reply".to_string())?
+    }
+
+    /// Request cancellation of an in-flight upload.
+    pub async fn cancel_upload(&self) -> Result<(), String> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(AgentCommand::CancelUpload { reply })
+            .await
+            .map_err(|_| "agent thread gone".to_string())?;
+        rx.await.map_err(|_| "agent thread dropped reply".to_string())
     }
 
     /// Start a cloud print job.
@@ -191,6 +204,11 @@ pub fn spawn_agent_thread(agent: BambuAgent) -> AgentHandle {
                     AgentCommand::StartPrint { request, reply } => {
                         let result = agent.start_print(&request);
                         let _ = reply.send(result);
+                    }
+                    AgentCommand::CancelUpload { reply } => {
+                        unsafe { crate::ffi::bambu_shim_request_cancel() };
+                        tracing::info!("upload cancellation requested");
+                        let _ = reply.send(());
                     }
                 }
 

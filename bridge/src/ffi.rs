@@ -139,6 +139,10 @@ extern "C" {
         ctx: *mut c_void,
     ) -> c_int;
 
+    // Upload cancellation
+    pub fn bambu_shim_request_cancel();
+    pub fn bambu_shim_reset_cancel();
+
     // Print
     pub fn bambu_shim_start_print(
         agent: *mut c_void,

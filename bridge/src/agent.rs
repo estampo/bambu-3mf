@@ -535,6 +535,10 @@ impl BambuAgent {
             result.print_result = -999;
             result.finished = 0;
 
+            // Reset cancel flag before each attempt so a stale cancel
+            // from a previous job doesn't abort this one.
+            unsafe { ffi::bambu_shim_reset_cancel() };
+
             let ret = unsafe {
                 ffi::bambu_shim_start_print(
                     self.agent,

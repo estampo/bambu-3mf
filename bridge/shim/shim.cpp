@@ -8,6 +8,7 @@
  * The library is loaded at runtime via dlopen — no compile-time linking needed.
  */
 
+#include <atomic>
 #include <cstring>
 #include <dlfcn.h>
 #include <functional>
@@ -413,6 +414,25 @@ int bambu_shim_set_on_subscribe_failure_fn(
 }
 
 // ---------------------------------------------------------------------------
+// Upload cancellation
+//
+// Global atomic flag checked by WasCancelledFn during file transfer.
+// The Rust side calls request_cancel() from the /cancel endpoint and
+// reset_cancel() before each new print. This follows the same global
+// pattern used by the callback setters above (single-agent constraint).
+// ---------------------------------------------------------------------------
+
+static std::atomic<bool> g_cancel_requested{false};
+
+void bambu_shim_request_cancel() {
+    g_cancel_requested.store(true, std::memory_order_seq_cst);
+}
+
+void bambu_shim_reset_cancel() {
+    g_cancel_requested.store(false, std::memory_order_seq_cst);
+}
+
+// ---------------------------------------------------------------------------
 // Print support
 // ---------------------------------------------------------------------------
 
@@ -517,7 +537,9 @@ int bambu_shim_start_print(
         else if (status == 7) { result->print_result = code; result->finished = 1; }
     };
 
-    WasCancelledFn cancel_fn = []() -> bool { return false; };
+    WasCancelledFn cancel_fn = []() -> bool {
+        return g_cancel_requested.load(std::memory_order_seq_cst);
+    };
     OnWaitFn wait_fn = [](int, std::string) -> bool { return false; };
 
     result->return_code = fp_start_print(agent, params, update_fn, cancel_fn, wait_fn);
