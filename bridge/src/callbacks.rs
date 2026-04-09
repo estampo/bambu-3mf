@@ -10,6 +10,14 @@ use std::sync::Mutex;
 
 /// Shared state for all callbacks. Allocated on the heap and passed as the
 /// `void* ctx` to every shim callback setter.
+///
+/// # Single-agent constraint
+///
+/// The underlying C++ shim stores callback function pointers and context
+/// pointers in file-scoped globals (`g_message_cb`, `g_server_cb`, etc.).
+/// This means only one `CallbackState` (and therefore one `BambuAgent`)
+/// can be active in a process at a time. Registering callbacks from a
+/// second agent would silently overwrite the first agent's callbacks.
 pub struct CallbackState {
     pub server_connected: AtomicBool,
     pub user_logged_in: AtomicBool,
@@ -48,11 +56,11 @@ unsafe fn state(ctx: *mut c_void) -> &'static CallbackState {
     &*(ctx as *const CallbackState)
 }
 
-unsafe fn cstr_to_str(ptr: *const c_char) -> &'static str {
+unsafe fn cstr_to_string(ptr: *const c_char) -> String {
     if ptr.is_null() {
-        return "";
+        return String::new();
     }
-    CStr::from_ptr(ptr).to_str().unwrap_or("")
+    CStr::from_ptr(ptr).to_str().unwrap_or("").to_owned()
 }
 
 pub extern "C" fn on_server_connected(rc: c_int, _reason: c_int, ctx: *mut c_void) {
@@ -65,24 +73,24 @@ pub extern "C" fn on_server_connected(rc: c_int, _reason: c_int, ctx: *mut c_voi
 
 pub extern "C" fn on_message(dev_id: *const c_char, msg: *const c_char, ctx: *mut c_void) {
     let s = unsafe { state(ctx) };
-    let dev = unsafe { cstr_to_str(dev_id) };
-    let payload = unsafe { cstr_to_str(msg) };
+    let dev = unsafe { cstr_to_string(dev_id) };
+    let payload = unsafe { cstr_to_string(msg) };
     if payload.is_empty() || payload == "{}" {
         return;
     }
-    tracing::trace!(dev_id = dev, len = payload.len(), "mqtt message");
+    tracing::trace!(dev_id = &*dev, len = payload.len(), "mqtt message");
     let mut lock = s.messages.lock().unwrap();
     lock.push(MqttMessage {
-        dev_id: dev.to_owned(),
-        payload: payload.to_owned(),
+        dev_id: dev,
+        payload,
     });
 }
 
 pub extern "C" fn on_printer_connected(topic: *const c_char, ctx: *mut c_void) {
     let s = unsafe { state(ctx) };
     s.printer_subscribed.store(true, Ordering::SeqCst);
-    let t = unsafe { cstr_to_str(topic) };
-    tracing::debug!(topic = t, "printer_connected callback");
+    let t = unsafe { cstr_to_string(topic) };
+    tracing::debug!(topic = &*t, "printer_connected callback");
 }
 
 pub extern "C" fn on_user_login(_online: c_int, login: c_int, ctx: *mut c_void) {
@@ -94,13 +102,13 @@ pub extern "C" fn on_user_login(_online: c_int, login: c_int, ctx: *mut c_void) 
 }
 
 pub extern "C" fn on_http_error(code: c_uint, body: *const c_char, _ctx: *mut c_void) {
-    let b = unsafe { cstr_to_str(body) };
+    let b = unsafe { cstr_to_string(body) };
     tracing::warn!(code, body = &b[..b.len().min(200)], "http_error callback");
 }
 
 pub extern "C" fn on_subscribe_failure(topic: *const c_char, _ctx: *mut c_void) {
-    let t = unsafe { cstr_to_str(topic) };
-    tracing::warn!(topic = t, "subscribe_failure callback");
+    let t = unsafe { cstr_to_string(topic) };
+    tracing::warn!(topic = &*t, "subscribe_failure callback");
 }
 
 // ---------------------------------------------------------------------------

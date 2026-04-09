@@ -14,6 +14,7 @@ use std::io::{self, BufRead, Write};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::process;
+use std::sync::atomic::{AtomicI32, Ordering};
 use std::time::Duration;
 
 use clap::{Parser, Subcommand};
@@ -94,13 +95,13 @@ enum Command {
 }
 
 /// Saved original stdout fd, used to restore after suppressing library noise.
-static mut SAVED_STDOUT: i32 = -1;
+static SAVED_STDOUT: AtomicI32 = AtomicI32::new(-1);
 
 /// Suppress stdout to hide library noise (e.g. "use_count = 4").
 /// Logs (tracing) go to stderr and are unaffected.
 fn suppress_stdout() {
     unsafe {
-        SAVED_STDOUT = libc::dup(1);
+        SAVED_STDOUT.store(libc::dup(1), Ordering::SeqCst);
         let devnull = libc::open(b"/dev/null\0".as_ptr() as *const _, libc::O_WRONLY);
         if devnull >= 0 {
             libc::dup2(devnull, 1);
@@ -112,8 +113,9 @@ fn suppress_stdout() {
 /// Restore stdout after suppression.
 fn restore_stdout() {
     unsafe {
-        if SAVED_STDOUT >= 0 {
-            libc::dup2(SAVED_STDOUT, 1);
+        let fd = SAVED_STDOUT.load(Ordering::SeqCst);
+        if fd >= 0 {
+            libc::dup2(fd, 1);
         }
     }
 }

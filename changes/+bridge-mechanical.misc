@@ -1,0 +1,1 @@
+Bridge: fix static-mut UB, cstr_to_str lifetime, document single-agent constraint.

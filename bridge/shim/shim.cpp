@@ -288,6 +288,14 @@ int bambu_shim_send_message_to_printer(
 //
 // Each stores a C function pointer + void* context, wraps it in a
 // std::function, and passes it to the real .so function.
+//
+// IMPORTANT: Single-agent constraint
+// The callback function pointers and context pointers (g_server_cb,
+// g_message_cb, etc.) are file-scoped globals. This means only ONE agent
+// instance can have callbacks registered at a time. If a second agent
+// calls these setters, it silently overwrites the first agent's callbacks.
+// This is acceptable because the Bambu networking .so itself only supports
+// one agent per process.
 // ---------------------------------------------------------------------------
 
 // on_server_connected(int rc, int reason)

@@ -165,6 +165,14 @@ impl Credentials {
 }
 
 /// High-level agent wrapping the C++ shim + .so library.
+///
+/// # Single-instance constraint
+///
+/// Only one `BambuAgent` may exist per process. The C++ shim (`shim.cpp`)
+/// stores callback function pointers and context pointers in file-scoped
+/// globals, so creating a second agent would silently overwrite the first
+/// agent's callbacks and lead to undefined behavior. This is a fundamental
+/// limitation of the Bambu networking library's callback registration API.
 pub struct BambuAgent {
     agent: *mut c_void,
     // Box to ensure stable address for callback context pointer
