@@ -13,9 +13,15 @@ import pytest
 
 from bambox.bridge import (
     _build_ams_mapping,
+    _cloud_print_impl,
     _find_local_bridge,
     _patch_config_3mf_colors,
     _run_bridge_local,
+    _strip_gcode_from_3mf,
+    _write_token_json,
+    load_credentials,
+    parse_ams_trays,
+    query_status,
 )
 
 
@@ -296,3 +302,346 @@ class TestPatchConfigColors:
                 ns = root.tag[: root.tag.index("}") + 1]
             fil = root.find(f"{ns}plate").find(f"{ns}filament")
             assert fil.get("color") == "#00FF00"
+
+
+# ---------------------------------------------------------------------------
+# load_credentials
+# ---------------------------------------------------------------------------
+
+
+class TestLoadCredentials:
+    def test_loads_valid_toml(self, tmp_path):
+        cred = tmp_path / "credentials.toml"
+        cred.write_text('[cloud]\ntoken = "tok"\nrefresh_token = "rt"\nemail = "a@b"\nuid = "u1"\n')
+        result = load_credentials(cred)
+        assert result["token"] == "tok"
+        assert result["refresh_token"] == "rt"
+
+    def test_missing_file_raises(self, tmp_path):
+        with pytest.raises(FileNotFoundError, match="Credentials file not found"):
+            load_credentials(tmp_path / "nope.toml")
+
+    def test_missing_cloud_section_raises(self, tmp_path):
+        cred = tmp_path / "credentials.toml"
+        cred.write_text("[other]\nfoo = 1\n")
+        with pytest.raises(ValueError, match="No \\[cloud\\] credentials"):
+            load_credentials(cred)
+
+    def test_missing_token_raises(self, tmp_path):
+        cred = tmp_path / "credentials.toml"
+        cred.write_text('[cloud]\nemail = "a@b"\n')
+        with pytest.raises(ValueError, match="No \\[cloud\\] credentials"):
+            load_credentials(cred)
+
+    def test_default_path_when_none(self, tmp_path):
+        """When path is None, it looks under ~/.config/estampo/."""
+        with patch("bambox.bridge.Path.home", return_value=tmp_path):
+            cfg = tmp_path / ".config" / "estampo"
+            cfg.mkdir(parents=True)
+            cred = cfg / "credentials.toml"
+            cred.write_text('[cloud]\ntoken = "t"\n')
+            result = load_credentials(None)
+            assert result["token"] == "t"
+
+
+# ---------------------------------------------------------------------------
+# _write_token_json
+# ---------------------------------------------------------------------------
+
+
+class TestWriteTokenJson:
+    def test_writes_json_with_correct_keys(self, tmp_path):
+        cloud = {"token": "tok", "refresh_token": "rt", "email": "a@b", "uid": "u1"}
+        path = _write_token_json(cloud, directory=tmp_path)
+        try:
+            data = json.loads(path.read_text())
+            assert data["token"] == "tok"
+            assert data["refreshToken"] == "rt"
+            assert data["email"] == "a@b"
+            assert data["uid"] == "u1"
+        finally:
+            path.unlink()
+
+    def test_defaults_for_missing_keys(self, tmp_path):
+        cloud = {"token": "tok"}
+        path = _write_token_json(cloud, directory=tmp_path)
+        try:
+            data = json.loads(path.read_text())
+            assert data["refreshToken"] == ""
+            assert data["email"] == ""
+            assert data["uid"] == ""
+        finally:
+            path.unlink()
+
+    def test_file_permissions(self, tmp_path):
+        cloud = {"token": "tok"}
+        path = _write_token_json(cloud, directory=tmp_path)
+        try:
+            assert oct(path.stat().st_mode & 0o777) == oct(0o600)
+        finally:
+            path.unlink()
+
+
+# ---------------------------------------------------------------------------
+# parse_ams_trays
+# ---------------------------------------------------------------------------
+
+
+class TestParseAmsTrays:
+    def test_parses_single_ams_unit(self):
+        status = {
+            "ams": {
+                "ams": [
+                    {
+                        "id": "0",
+                        "tray": [
+                            {
+                                "id": "0",
+                                "tray_type": "PLA",
+                                "tray_color": "FF0000FF",
+                                "tray_info_idx": "GFL00",
+                            },
+                            {
+                                "id": "1",
+                                "tray_type": "PETG",
+                                "tray_color": "00FF00FF",
+                                "tray_info_idx": "GFG00",
+                            },
+                        ],
+                    }
+                ]
+            }
+        }
+        trays = parse_ams_trays(status)
+        assert len(trays) == 2
+        assert trays[0] == {
+            "phys_slot": 0,
+            "ams_id": 0,
+            "slot_id": 0,
+            "type": "PLA",
+            "color": "FF0000",
+            "tray_info_idx": "GFL00",
+        }
+        assert trays[1]["phys_slot"] == 1
+        assert trays[1]["color"] == "00FF00"
+
+    def test_skips_empty_trays(self):
+        status = {
+            "ams": {
+                "ams": [
+                    {
+                        "id": "0",
+                        "tray": [
+                            {"id": "0", "tray_type": "", "tray_color": ""},
+                            {"id": "1", "tray_type": "PLA", "tray_color": "FFFFFF"},
+                        ],
+                    }
+                ]
+            }
+        }
+        trays = parse_ams_trays(status)
+        assert len(trays) == 1
+        assert trays[0]["type"] == "PLA"
+
+    def test_multi_ams_units(self):
+        status = {
+            "ams": {
+                "ams": [
+                    {
+                        "id": "0",
+                        "tray": [{"id": "2", "tray_type": "PLA", "tray_color": "FF0000"}],
+                    },
+                    {
+                        "id": "1",
+                        "tray": [{"id": "0", "tray_type": "ABS", "tray_color": "0000FF"}],
+                    },
+                ]
+            }
+        }
+        trays = parse_ams_trays(status)
+        assert len(trays) == 2
+        assert trays[0]["phys_slot"] == 2  # ams_id=0, slot_id=2 -> 0*4+2
+        assert trays[1]["phys_slot"] == 4  # ams_id=1, slot_id=0 -> 1*4+0
+
+    def test_empty_status(self):
+        assert parse_ams_trays({}) == []
+        assert parse_ams_trays({"ams": {}}) == []
+        assert parse_ams_trays({"ams": {"ams": []}}) == []
+
+
+# ---------------------------------------------------------------------------
+# _strip_gcode_from_3mf
+# ---------------------------------------------------------------------------
+
+
+class TestStripGcodeFrom3mf:
+    def test_strips_gcode_keeps_metadata(self, tmp_path):
+        threemf = tmp_path / "test.3mf"
+        with zipfile.ZipFile(threemf, "w") as z:
+            z.writestr("[Content_Types].xml", "<Types/>")
+            z.writestr("_rels/.rels", "<Relationships/>")
+            z.writestr("Metadata/slice_info.config", "<config/>")
+            z.writestr("Metadata/project_settings.config", "{}")
+            z.writestr("Metadata/plate_1.json", '{"plate": 1}')
+            # These should be stripped
+            z.writestr("Metadata/plate_1.gcode", "G28\nG1 X10")
+            z.writestr("Metadata/plate_1.png", b"fake-png")
+            z.writestr("Metadata/.md5", "checksums")
+
+        result = _strip_gcode_from_3mf(threemf)
+        with zipfile.ZipFile(io.BytesIO(result), "r") as z:
+            names = z.namelist()
+            assert "[Content_Types].xml" in names
+            assert "_rels/.rels" in names
+            assert "Metadata/slice_info.config" in names
+            assert "Metadata/project_settings.config" in names
+            assert "Metadata/plate_1.json" in names
+            # Stripped entries
+            assert "Metadata/plate_1.gcode" not in names
+            assert "Metadata/plate_1.png" not in names
+            assert "Metadata/.md5" not in names
+
+    def test_preserves_model_settings_rels(self, tmp_path):
+        threemf = tmp_path / "test.3mf"
+        with zipfile.ZipFile(threemf, "w") as z:
+            z.writestr("Metadata/_rels/model_settings.config.rels", "<rels/>")
+            z.writestr("Metadata/model_settings.config", "<model/>")
+        result = _strip_gcode_from_3mf(threemf)
+        with zipfile.ZipFile(io.BytesIO(result), "r") as z:
+            assert "Metadata/_rels/model_settings.config.rels" in z.namelist()
+            assert "Metadata/model_settings.config" in z.namelist()
+
+
+# ---------------------------------------------------------------------------
+# query_status
+# ---------------------------------------------------------------------------
+
+
+class TestQueryStatus:
+    def test_parses_print_key(self, tmp_path):
+        token = tmp_path / "token.json"
+        token.write_text("{}")
+        status_json = json.dumps({"print": {"mc_percent": 50, "gcode_state": "RUNNING"}})
+        with patch("bambox.bridge._run_bridge") as mock_bridge:
+            mock_bridge.return_value = subprocess.CompletedProcess([], 0, status_json, "")
+            result = query_status("DEV1", token)
+            assert result["mc_percent"] == 50
+
+    def test_returns_raw_when_no_print_key(self, tmp_path):
+        token = tmp_path / "token.json"
+        token.write_text("{}")
+        status_json = json.dumps({"gcode_state": "IDLE"})
+        with patch("bambox.bridge._run_bridge") as mock_bridge:
+            mock_bridge.return_value = subprocess.CompletedProcess([], 0, status_json, "")
+            result = query_status("DEV1", token)
+            assert result["gcode_state"] == "IDLE"
+
+    def test_non_json_raises(self, tmp_path):
+        token = tmp_path / "token.json"
+        token.write_text("{}")
+        with patch("bambox.bridge._run_bridge") as mock_bridge:
+            mock_bridge.return_value = subprocess.CompletedProcess([], 1, "error text", "fail")
+            with pytest.raises(RuntimeError, match="Bridge returned non-JSON"):
+                query_status("DEV1", token)
+
+
+# ---------------------------------------------------------------------------
+# _cloud_print_impl — argument building
+# ---------------------------------------------------------------------------
+
+
+class TestCloudPrintImpl:
+    def _setup_3mf(self, tmp_path):
+        """Create a minimal 3MF for _cloud_print_impl."""
+        threemf = tmp_path / "test.gcode.3mf"
+        _make_test_3mf(threemf, [(1, "PLA", "FF0000")])
+        token = tmp_path / "token.json"
+        token.write_text("{}")
+        return threemf, token
+
+    def test_skip_ams_builds_basic_args(self, tmp_path):
+        threemf, token = self._setup_3mf(tmp_path)
+        response = {"result": "success"}
+        with patch("bambox.bridge._run_bridge") as mock_bridge:
+            mock_bridge.return_value = subprocess.CompletedProcess([], 0, json.dumps(response), "")
+            result = _cloud_print_impl(
+                threemf,
+                "DEV1",
+                token,
+                project_name="test",
+                timeout=60,
+                verbose=False,
+                skip_ams_mapping=True,
+                ams_trays=[],
+            )
+            assert result == response
+            call_args = mock_bridge.call_args[0][0]
+            assert call_args[0] == "print"
+            assert "--project" in call_args
+            assert call_args[call_args.index("--project") + 1] == "test"
+            assert "--timeout" in call_args
+            assert "--config-3mf" in call_args
+
+    def test_with_ams_trays_builds_mapping_args(self, tmp_path):
+        threemf, token = self._setup_3mf(tmp_path)
+        ams_trays = [
+            {
+                "phys_slot": 2,
+                "ams_id": 0,
+                "slot_id": 2,
+                "type": "PLA",
+                "color": "FF0000",
+                "tray_info_idx": "",
+            },
+        ]
+        response = {"result": "success"}
+        with patch("bambox.bridge._run_bridge") as mock_bridge:
+            mock_bridge.return_value = subprocess.CompletedProcess([], 0, json.dumps(response), "")
+            _cloud_print_impl(
+                threemf,
+                "DEV1",
+                token,
+                project_name="bambox",
+                timeout=120,
+                verbose=False,
+                skip_ams_mapping=False,
+                ams_trays=ams_trays,
+            )
+            call_args = mock_bridge.call_args[0][0]
+            assert "--ams-mapping" in call_args
+            assert "--ams-mapping2" in call_args
+
+    def test_non_json_response_raises(self, tmp_path):
+        threemf, token = self._setup_3mf(tmp_path)
+        with patch("bambox.bridge._run_bridge") as mock_bridge:
+            mock_bridge.return_value = subprocess.CompletedProcess([], 1, "garbage", "err")
+            with pytest.raises(RuntimeError, match="Bridge returned non-JSON"):
+                _cloud_print_impl(
+                    threemf,
+                    "DEV1",
+                    token,
+                    project_name="bambox",
+                    timeout=60,
+                    verbose=False,
+                    skip_ams_mapping=True,
+                    ams_trays=[],
+                )
+
+    def test_cleans_up_config_3mf(self, tmp_path):
+        threemf, token = self._setup_3mf(tmp_path)
+        response = {"result": "success"}
+        with patch("bambox.bridge._run_bridge") as mock_bridge:
+            mock_bridge.return_value = subprocess.CompletedProcess([], 0, json.dumps(response), "")
+            _cloud_print_impl(
+                threemf,
+                "DEV1",
+                token,
+                project_name="bambox",
+                timeout=60,
+                verbose=False,
+                skip_ams_mapping=True,
+                ams_trays=[],
+            )
+        # Config 3mf should be cleaned up
+        config_path = tmp_path / "test.gcode_config.3mf"
+        assert not config_path.exists()
