@@ -5,6 +5,22 @@ This changelog is managed by [towncrier](https://towncrier.readthedocs.io/).
 
 <!-- towncrier release notes start -->
 
+## 0.2.1 — 2026-04-09
+
+### Features
+
+- Add e2e comparison test: CuraEngine + bambox pack vs BambuStudio reference (``pytest -m e2e``)
+
+### Bugfixes
+
+- Fix CuraEngine P1S packaging: feedrate conversion (#96), multi-filament detection (#97), printer_model_id (#98), slice statistics (#99), template array-as-scalar (#100)
+
+### Misc
+
+- Expand e2e CuraEngine vs BambuStudio tests to validate gcode safety, multi-filament metadata, and print statistics
+- Fix release pipeline: reorder so PyPI publishes last (after GitHub Release), make github-release idempotent on retry, update prepare-release PR description.
+
+
 ## 0.2.0 — 2026-04-09
 
 ### Features
