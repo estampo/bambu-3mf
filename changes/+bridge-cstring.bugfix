@@ -1,0 +1,1 @@
+Bridge: replace CString panics with proper error propagation for user-supplied strings.

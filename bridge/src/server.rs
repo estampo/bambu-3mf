@@ -287,7 +287,14 @@ async fn cancel_print(
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorResponse>)> {
     let agent = state.agent.lock().unwrap();
     let stop_cmd = r#"{"print":{"command":"stop","sequence_id":"0"}}"#;
-    let ret = agent.send_message(&device_id, stop_cmd);
+    let ret = agent.send_message(&device_id, stop_cmd).map_err(|e| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: format!("invalid device_id: {e}"),
+            }),
+        )
+    })?;
 
     if ret != 0 {
         return Err((
