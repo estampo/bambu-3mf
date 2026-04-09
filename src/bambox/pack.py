@@ -14,6 +14,13 @@ import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import IO
+from xml.sax.saxutils import escape as _xml_escape_base
+
+
+def xml_escape(value: str) -> str:
+    """Escape a string for use inside XML double-quoted attribute values."""
+    return _xml_escape_base(value, {'"': "&quot;"})
+
 
 # Minimum AMS slot count for a P1S (4 AMS + 1 external spool).
 # All per-filament arrays in project_settings must be padded to this length.
@@ -207,7 +214,7 @@ def _slice_info_xml(info: SliceInfo) -> str:
         "<config>",
         "  <header>",
         '    <header_item key="X-BBL-Client-Type" value="slicer"/>',
-        f'    <header_item key="X-BBL-Client-Version" value="{info.client_version}"/>',
+        f'    <header_item key="X-BBL-Client-Version" value="{xml_escape(info.client_version)}"/>',
         "  </header>",
         "  <plate>",
         '    <metadata key="index" value="1"/>',
@@ -215,13 +222,17 @@ def _slice_info_xml(info: SliceInfo) -> str:
 
     # BBS 02.05+ optional metadata
     if info.extruder_type is not None:
-        lines.append(f'    <metadata key="extruder_type" value="{info.extruder_type}"/>')
+        lines.append(
+            f'    <metadata key="extruder_type" value="{xml_escape(str(info.extruder_type))}"/>'
+        )
     if info.nozzle_volume_type is not None:
-        lines.append(f'    <metadata key="nozzle_volume_type" value="{info.nozzle_volume_type}"/>')
+        lines.append(
+            f'    <metadata key="nozzle_volume_type" value="{xml_escape(str(info.nozzle_volume_type))}"/>'
+        )
 
     lines.extend(
         [
-            f'    <metadata key="printer_model_id" value="{info.printer_model_id}"/>',
+            f'    <metadata key="printer_model_id" value="{xml_escape(info.printer_model_id)}"/>',
             f'    <metadata key="nozzle_diameters" value="{info.nozzle_diameter}"/>',
             f'    <metadata key="timelapse_type" value="{info.timelapse_type}"/>',
             f'    <metadata key="prediction" value="{info.prediction}"/>',
@@ -237,45 +248,45 @@ def _slice_info_xml(info: SliceInfo) -> str:
             f'    <metadata key="outside" value="{str(info.outside).lower()}"/>',
             f'    <metadata key="support_used" value="{str(info.support_used).lower()}"/>',
             f'    <metadata key="label_object_enabled" value="{str(info.label_object_enabled).lower()}"/>',
-            f'    <metadata key="filament_maps" value="{filament_maps}"/>',
+            f'    <metadata key="filament_maps" value="{xml_escape(filament_maps)}"/>',
         ]
     )
 
     if info.limit_filament_maps:
         lines.append(
-            f'    <metadata key="limit_filament_maps" value="{info.limit_filament_maps}"/>'
+            f'    <metadata key="limit_filament_maps" value="{xml_escape(info.limit_filament_maps)}"/>'
         )
 
     for obj in info.objects:
         lines.append(
             f'    <object identify_id="{obj.identify_id}"'
-            f' name="{obj.name}" skipped="{str(obj.skipped).lower()}" />'
+            f' name="{xml_escape(obj.name)}" skipped="{str(obj.skipped).lower()}" />'
         )
 
     for f in info.filaments:
         attrs = (
-            f'id="{f.slot}" tray_info_idx="{f.tray_info_idx}"'
-            f' type="{f.filament_type}" color="{f.color}"'
+            f'id="{f.slot}" tray_info_idx="{xml_escape(f.tray_info_idx)}"'
+            f' type="{xml_escape(f.filament_type)}" color="{xml_escape(f.color)}"'
             f' used_m="{f.used_m:.2f}" used_g="{f.used_g:.2f}"'
         )
         if f.extra_attrs:
             for k, v in f.extra_attrs.items():
-                attrs += f' {k}="{v}"'
+                attrs += f' {xml_escape(k)}="{xml_escape(str(v))}"'
             lines.append(f"    <filament {attrs}/>")
         else:
             lines.append(f"    <filament {attrs} />")
 
     for w in info.warnings:
         lines.append(
-            f'    <warning msg="{w.msg}" level="{w.level}" error_code ="{w.error_code}"  />'
+            f'    <warning msg="{xml_escape(w.msg)}" level="{w.level}" error_code ="{xml_escape(w.error_code)}"  />'
         )
 
     if info.layer_filament_lists:
         lines.append("    <layer_filament_lists>")
         for lfl in info.layer_filament_lists:
             lines.append(
-                f'      <layer_filament_list filament_list="{lfl["filament_list"]}"'
-                f' layer_ranges="{lfl["layer_ranges"]}" />'
+                f'      <layer_filament_list filament_list="{xml_escape(lfl["filament_list"])}"'
+                f' layer_ranges="{xml_escape(lfl["layer_ranges"])}" />'
             )
         lines.append("    </layer_filament_lists>")
 

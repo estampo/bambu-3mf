@@ -15,8 +15,11 @@ from xml.etree import ElementTree as ET
 
 from bambox.pack import (
     FilamentInfo,
+    ObjectInfo,
     SliceInfo,
+    WarningInfo,
     _filament_maps_str,
+    _slice_info_xml,
     fixup_project_settings,
     pack_gcode_3mf,
 )
@@ -272,6 +275,111 @@ class TestSliceInfo:
         ref_keys = {m.get("key") for m in ref_root.findall(".//metadata")}
         our_keys = {m.get("key") for m in our_root.findall(".//metadata")}
         assert ref_keys == our_keys
+
+
+class TestXmlEscaping:
+    """Verify that special XML characters in user-controlled fields are escaped."""
+
+    def test_object_name_with_special_chars(self) -> None:
+        info = SliceInfo(
+            objects=[ObjectInfo(identify_id=1, name='Box & "Lid" <v2>')],
+            filaments=[
+                FilamentInfo(
+                    slot=1,
+                    tray_info_idx="GFG98",
+                    filament_type="PLA",
+                    color="#FFFFFF",
+                    used_m=1.0,
+                    used_g=2.0,
+                ),
+            ],
+        )
+        xml = _slice_info_xml(info)
+        root = ET.fromstring(xml)  # must parse without error
+        obj = root.find(".//object")
+        assert obj is not None
+        assert obj.get("name") == 'Box & "Lid" <v2>'
+
+    def test_warning_msg_with_ampersand(self) -> None:
+        info = SliceInfo(
+            warnings=[WarningInfo(msg="temp & pressure > limit", error_code="E&1")],
+            filaments=[
+                FilamentInfo(
+                    slot=1,
+                    tray_info_idx="GFG98",
+                    filament_type="PLA",
+                    color="#FFFFFF",
+                    used_m=1.0,
+                    used_g=2.0,
+                ),
+            ],
+        )
+        xml = _slice_info_xml(info)
+        root = ET.fromstring(xml)
+        warn = root.find(".//warning")
+        assert warn is not None
+        assert warn.get("msg") == "temp & pressure > limit"
+        assert warn.get("error_code") == "E&1"
+
+    def test_filament_type_with_quotes(self) -> None:
+        info = SliceInfo(
+            filaments=[
+                FilamentInfo(
+                    slot=1,
+                    tray_info_idx='T"1',
+                    filament_type='PLA&"Special"',
+                    color="#FF<00>",
+                    used_m=1.0,
+                    used_g=2.0,
+                ),
+            ],
+        )
+        xml = _slice_info_xml(info)
+        root = ET.fromstring(xml)
+        fil = root.find(".//filament")
+        assert fil is not None
+        assert fil.get("type") == 'PLA&"Special"'
+        assert fil.get("color") == "#FF<00>"
+        assert fil.get("tray_info_idx") == 'T"1'
+
+    def test_printer_model_id_escaped(self) -> None:
+        info = SliceInfo(
+            printer_model_id="P1S&<test>",
+            filaments=[
+                FilamentInfo(
+                    slot=1,
+                    tray_info_idx="GFG98",
+                    filament_type="PLA",
+                    color="#FFFFFF",
+                    used_m=1.0,
+                    used_g=2.0,
+                ),
+            ],
+        )
+        xml = _slice_info_xml(info)
+        root = ET.fromstring(xml)
+        meta = {m.get("key"): m.get("value") for m in root.findall(".//metadata")}
+        assert meta["printer_model_id"] == "P1S&<test>"
+
+    def test_extra_attrs_escaped(self) -> None:
+        info = SliceInfo(
+            filaments=[
+                FilamentInfo(
+                    slot=1,
+                    tray_info_idx="GFG98",
+                    filament_type="PLA",
+                    color="#FFFFFF",
+                    used_m=1.0,
+                    used_g=2.0,
+                    extra_attrs={"note": 'a&b<c"d'},
+                ),
+            ],
+        )
+        xml = _slice_info_xml(info)
+        root = ET.fromstring(xml)
+        fil = root.find(".//filament")
+        assert fil is not None
+        assert fil.get("note") == 'a&b<c"d'
 
 
 # ---------------------------------------------------------------------------
