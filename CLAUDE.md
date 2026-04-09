@@ -12,6 +12,16 @@ Before pushing any PR branch, always run locally:
 
 Do NOT push a PR until all four checks pass locally.
 
+## Cutting a Release (MANDATORY process)
+
+**Never push a version bump directly to main.** The release pipeline detects releases by looking for a merged `release/vX.Y.Z` PR — bypassing this means nothing gets published.
+
+1. Trigger **Actions → Prepare Release** with the target version.
+2. Review and merge the generated `release/vX.Y.Z` PR.
+3. The pipeline runs automatically: build → TestPyPI gate → tag → GitHub Release → PyPI.
+
+If the pipeline needs to be re-run manually, use **Actions → Release → Run workflow** with `tag: vX.Y.Z`. All steps are idempotent.
+
 ## Changelog (MANDATORY)
 Every PR must include a **towncrier fragment file** in the `changes/` directory:
 1. Create a file: `changes/<PR-number>.<type>` where type is `feature`, `bugfix`, or `misc`
