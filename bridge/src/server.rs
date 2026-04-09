@@ -9,7 +9,7 @@
 //!   WS   /watch/:device_id  — (Phase 2b, not yet implemented)
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
 use axum::extract::{Path, State};
@@ -19,7 +19,7 @@ use axum::routing::get;
 use axum::Router;
 use serde::{Deserialize, Serialize};
 
-use crate::agent::BambuAgent;
+use crate::handle::AgentHandle;
 
 // ---------------------------------------------------------------------------
 // Shared state
@@ -41,8 +41,8 @@ pub struct PrinterEntry {
 
 /// Shared state across all HTTP handlers.
 pub struct AppState {
-    /// The FFI agent (behind Mutex because it's not Sync).
-    pub agent: Mutex<BambuAgent>,
+    /// Handle to the agent thread (sends commands via channel).
+    pub handle: AgentHandle,
     /// Cached printer status per device_id.
     pub cache: RwLock<HashMap<String, DeviceStatus>>,
     /// Configured printers from credentials file.
@@ -54,9 +54,9 @@ pub struct AppState {
 pub type SharedState = Arc<AppState>;
 
 impl AppState {
-    pub fn new(agent: BambuAgent, printers: Vec<(String, String)>) -> SharedState {
+    pub fn new(handle: AgentHandle, printers: Vec<(String, String)>) -> SharedState {
         Arc::new(Self {
-            agent: Mutex::new(agent),
+            handle,
             cache: RwLock::new(HashMap::new()),
             printers: printers
                 .into_iter()
@@ -98,7 +98,7 @@ pub struct ErrorResponse {
 // ---------------------------------------------------------------------------
 
 /// GET /ping — lightweight process liveness check.
-/// No mutex, no FFI, no cloud calls. Always fast.
+/// No channel, no FFI, no cloud calls. Always fast.
 async fn ping(State(state): State<SharedState>) -> Json<PingResponse> {
     Json(PingResponse {
         status: "ok".into(),
@@ -117,10 +117,12 @@ fn read_rss_kb() -> u64 {
         .unwrap_or(0)
 }
 
+/// GET /health — reads MQTT connection state directly from shared atomic.
+/// No channel round-trip needed.
 async fn health(State(state): State<SharedState>) -> Json<HealthResponse> {
-    let agent = state.agent.lock().unwrap();
-    let mqtt_connected = agent
-        .callback_state()
+    let mqtt_connected = state
+        .handle
+        .callback_state
         .server_connected
         .load(std::sync::atomic::Ordering::SeqCst);
     let cached_devices: Vec<String> = state
@@ -154,41 +156,43 @@ async fn get_status(
         }
     }
 
-    // Cache miss or stale — do a live query
-    let payload = {
-        let agent = state.agent.lock().unwrap();
+    // Cache miss or stale — do a live query via the agent channel
+    state
+        .handle
+        .drain_messages()
+        .await
+        .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, e))?;
 
-        // Drain stale messages
-        agent.drain_messages();
-
-        if let Err(e) = agent.subscribe_and_pushall(&device_id, Duration::from_secs(10)) {
-            return Err((
+    state
+        .handle
+        .subscribe_and_pushall(device_id.clone(), Duration::from_secs(10))
+        .await
+        .map_err(|e| {
+            err(
                 StatusCode::BAD_GATEWAY,
-                Json(ErrorResponse {
-                    error: format!("MQTT query failed: {e}"),
-                }),
-            ));
+                format!("MQTT query failed: {e}"),
+            )
+        })?;
+
+    let messages = state
+        .handle
+        .drain_messages()
+        .await
+        .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+
+    let best = messages.iter().max_by_key(|m| m.payload.len());
+
+    let payload = match best {
+        Some(msg) => {
+            serde_json::from_str(&msg.payload).unwrap_or_else(|_| {
+                serde_json::json!({"raw": msg.payload})
+            })
         }
-
-        let messages = agent.drain_messages();
-        let best = messages.iter().max_by_key(|m| m.payload.len());
-
-        match best {
-            Some(msg) => {
-                let value: serde_json::Value =
-                    serde_json::from_str(&msg.payload).unwrap_or_else(|_| {
-                        serde_json::json!({"raw": msg.payload})
-                    });
-                value
-            }
-            None => {
-                return Err((
-                    StatusCode::GATEWAY_TIMEOUT,
-                    Json(ErrorResponse {
-                        error: format!("no status received from {device_id}"),
-                    }),
-                ));
-            }
+        None => {
+            return Err(err(
+                StatusCode::GATEWAY_TIMEOUT,
+                format!("no status received from {device_id}"),
+            ));
         }
     };
 
@@ -285,23 +289,22 @@ async fn cancel_print(
     State(state): State<SharedState>,
     Path(device_id): Path<String>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorResponse>)> {
-    let agent = state.agent.lock().unwrap();
     let stop_cmd = r#"{"print":{"command":"stop","sequence_id":"0"}}"#;
-    let ret = agent.send_message(&device_id, stop_cmd).map_err(|e| {
-        (
-            StatusCode::BAD_REQUEST,
-            Json(ErrorResponse {
-                error: format!("invalid device_id: {e}"),
-            }),
-        )
-    })?;
+    let ret = state
+        .handle
+        .send_message(device_id.clone(), stop_cmd.to_string())
+        .await
+        .map_err(|e| {
+            err(
+                StatusCode::BAD_REQUEST,
+                format!("invalid device_id: {e}"),
+            )
+        })?;
 
     if ret != 0 {
-        return Err((
+        return Err(err(
             StatusCode::BAD_GATEWAY,
-            Json(ErrorResponse {
-                error: format!("send_message returned {ret}"),
-            }),
+            format!("send_message returned {ret}"),
         ));
     }
 
@@ -444,25 +447,22 @@ async fn start_print(
         "print request prepared"
     );
 
-    // Run the blocking FFI call on a separate thread
-    let state_clone = state.clone();
-    let result = tokio::task::spawn_blocking(move || {
-        // Verify files exist before calling FFI
-        let file_exists = std::path::Path::new(&request.filename).exists();
-        let config_exists = request.config_filename.as_ref()
-            .map(|p| std::path::Path::new(p).exists())
-            .unwrap_or(false);
-        tracing::info!(file_exists, config_exists, "pre-print file check");
+    // Verify files exist before sending to agent
+    let file_exists = std::path::Path::new(&request.filename).exists();
+    let config_exists = request.config_filename.as_ref()
+        .map(|p| std::path::Path::new(p).exists())
+        .unwrap_or(false);
+    tracing::info!(file_exists, config_exists, "pre-print file check");
 
-        let agent = state_clone.agent.lock().unwrap();
-        let res = agent.start_print(&request);
-        // tmp_dir is dropped here, cleaning up files
-        drop(tmp_dir);
-        res
-    })
-    .await
-    .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, format!("task join: {e}")))?
-    .map_err(|e| err(StatusCode::BAD_GATEWAY, e))?;
+    // Send print command via channel — the agent thread does the blocking FFI call
+    let result = state
+        .handle
+        .start_print(request)
+        .await
+        .map_err(|e| err(StatusCode::BAD_GATEWAY, e))?;
+
+    // tmp_dir is dropped here, cleaning up files
+    drop(tmp_dir);
 
     let is_error = result.return_code != 0 && result.return_code != -1;
     if is_error {
@@ -491,32 +491,35 @@ async fn get_printer_status_for_ams(
         }
     }
 
-    // No cache — try a live query (blocking, so we spawn)
-    let state_clone = state.clone();
-    let device_id = device_id.to_string();
-    let device_id_for_cache = device_id.clone();
-    let result = tokio::task::spawn_blocking(move || {
-        let agent = state_clone.agent.lock().unwrap();
-        agent.drain_messages();
-        if agent
-            .subscribe_and_pushall(&device_id, Duration::from_secs(10))
-            .is_err()
-        {
-            return None;
-        }
-        let messages = agent.drain_messages();
-        let best = messages.iter().max_by_key(|m| m.payload.len());
-        best.and_then(|msg| serde_json::from_str::<serde_json::Value>(&msg.payload).ok())
-    })
-    .await
-    .ok()
-    .flatten();
+    // No cache — try a live query via agent channel
+    let device_id_owned = device_id.to_string();
+
+    if state.handle.drain_messages().await.is_err() {
+        return None;
+    }
+
+    if state
+        .handle
+        .subscribe_and_pushall(device_id_owned.clone(), Duration::from_secs(10))
+        .await
+        .is_err()
+    {
+        return None;
+    }
+
+    let messages = match state.handle.drain_messages().await {
+        Ok(m) => m,
+        Err(_) => return None,
+    };
+
+    let best = messages.iter().max_by_key(|m| m.payload.len());
+    let result = best.and_then(|msg| serde_json::from_str::<serde_json::Value>(&msg.payload).ok());
 
     // Cache the result if we got one
     if let Some(ref payload) = result {
         let mut cache = state.cache.write().unwrap();
         cache.insert(
-            device_id_for_cache,
+            device_id_owned,
             DeviceStatus {
                 payload: payload.clone(),
                 updated_at: Instant::now(),
@@ -546,8 +549,9 @@ pub fn mock_state_with_printers(
     devices: HashMap<String, serde_json::Value>,
     printers: Vec<(String, String)>,
 ) -> SharedState {
+    let handle = crate::handle::test_handle();
     let state = Arc::new(AppState {
-        agent: Mutex::new(unsafe { BambuAgent::test_null() }),
+        handle,
         cache: RwLock::new(
             devices
                 .into_iter()

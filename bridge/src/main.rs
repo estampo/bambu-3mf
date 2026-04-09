@@ -7,6 +7,7 @@ mod agent;
 mod callbacks;
 mod fetch;
 mod ffi;
+mod handle;
 mod print_job;
 mod server;
 
@@ -407,7 +408,8 @@ async fn main() {
             let agent = init_agent(&lib_path, &creds);
             restore_stdout();
 
-            let state = server::AppState::new(agent, printers);
+            let agent_handle = handle::spawn_agent_thread(agent);
+            let state = server::AppState::new(agent_handle, printers);
             let app = server::router(state);
 
             let addr: SocketAddr = format!("{bind}:{port}")
