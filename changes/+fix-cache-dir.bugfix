@@ -1,0 +1,1 @@
+Use ``XDG_CACHE_HOME`` with ``tempfile.gettempdir()`` fallback for cloud token files instead of hardcoded ``~/.cache/bambox``, fixing ``PermissionError`` in sandboxed environments.
