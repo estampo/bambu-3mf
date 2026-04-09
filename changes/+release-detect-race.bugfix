@@ -1,0 +1,1 @@
+Fix release workflow race condition: detect version from merge commit message instead of relying on GitHub API that may not be indexed yet.
