@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
+import zipfile
 from unittest.mock import patch
 
-from bambox.bridge import _find_local_bridge, _run_bridge_local
+from bambox.bridge import _build_ams_mapping, _find_local_bridge, _run_bridge_local
 
 
 class TestFindLocalBridge:
@@ -80,3 +82,90 @@ class TestRunBridgeFallback:
 
             _run_bridge(["status", "DEVICE123", "/tmp/token.json"])
             mock_docker.assert_called_once()
+
+
+def _make_test_3mf(path, filaments, project_settings=None):
+    """Create a minimal 3MF zip with slice_info and optional project_settings."""
+    slice_info = "<config>\n  <plate>\n"
+    for fid, ftype, color in filaments:
+        slice_info += f'    <filament id="{fid}" type="{ftype}" color="#{color}" />\n'
+    slice_info += "  </plate>\n</config>"
+
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr("Metadata/slice_info.config", slice_info)
+        if project_settings is not None:
+            z.writestr(
+                "Metadata/project_settings.config",
+                json.dumps(project_settings),
+            )
+
+
+class TestBuildAmsMapping:
+    def test_unmatched_filament_stays_unresolved(self, tmp_path):
+        """Filaments with no matching AMS tray must get -1, not identity-mapped."""
+        threemf = tmp_path / "test.3mf"
+        # Filament slot 1: PLA, red — no matching tray in AMS
+        _make_test_3mf(threemf, [(1, "PLA", "FF0000")])
+
+        # AMS has only PETG trays — no type or color match
+        ams_trays = [
+            {
+                "phys_slot": 0,
+                "ams_id": 0,
+                "slot_id": 0,
+                "type": "PETG",
+                "color": "00FF00",
+                "tray_info_idx": "",
+            },
+        ]
+
+        result = _build_ams_mapping(threemf, ams_trays)
+        # Slot must be -1 (unresolved), not 0 (identity-mapped)
+        assert result["amsMapping"] == [-1]
+        assert result["amsMapping2"] == [{"ams_id": 255, "slot_id": 255}]
+
+    def test_matched_filament_maps_correctly(self, tmp_path):
+        """Filaments with a matching AMS tray get the correct physical slot."""
+        threemf = tmp_path / "test.3mf"
+        _make_test_3mf(threemf, [(1, "PLA", "FF0000")])
+
+        ams_trays = [
+            {
+                "phys_slot": 2,
+                "ams_id": 0,
+                "slot_id": 2,
+                "type": "PLA",
+                "color": "FF0000",
+                "tray_info_idx": "",
+            },
+        ]
+
+        result = _build_ams_mapping(threemf, ams_trays)
+        assert result["amsMapping"] == [2]
+        assert result["amsMapping2"] == [{"ams_id": 0, "slot_id": 2}]
+
+    def test_mixed_matched_and_unmatched(self, tmp_path):
+        """Only matched filaments get mapped; unmatched stay -1."""
+        threemf = tmp_path / "test.3mf"
+        _make_test_3mf(
+            threemf,
+            [(1, "PLA", "FF0000"), (2, "ABS", "0000FF")],
+            project_settings={"filament_colour": ["#FF0000FF", "#0000FFFF"]},
+        )
+
+        # Only PLA/red available in AMS
+        ams_trays = [
+            {
+                "phys_slot": 1,
+                "ams_id": 0,
+                "slot_id": 1,
+                "type": "PLA",
+                "color": "FF0000",
+                "tray_info_idx": "",
+            },
+        ]
+
+        result = _build_ams_mapping(threemf, ams_trays)
+        assert result["amsMapping"] == [1, -1]
+        assert result["amsMapping2"][0] == {"ams_id": 0, "slot_id": 1}
+        assert result["amsMapping2"][1] == {"ams_id": 255, "slot_id": 255}
