@@ -149,6 +149,18 @@ def _cmd_pack(args: argparse.Namespace) -> None:
         for slot, ftype, color in assigned
     ]
 
+    # Look up tray_info_idx from filament profiles so slice_info.config
+    # carries the correct Bambu filament IDs for AMS slot matching.
+    from bambox.settings import _filament_profile_path, _load_json
+
+    for fi in filament_infos:
+        try:
+            profile = _load_json(_filament_profile_path(fi.filament_type))
+            if "filament_ids" in profile:
+                fi.tray_info_idx = profile["filament_ids"]
+        except ValueError:
+            pass  # unknown filament type — keep default
+
     # Auto-derive printer_model_id from BAMBOX_PRINTER header if not set via CLI
     printer_model_id = args.printer_model_id
     if not printer_model_id and "PRINTER" in headers:

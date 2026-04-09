@@ -1,0 +1,1 @@
+Fix AMS slot matching: populate tray_info_idx from filament profiles instead of defaulting all slots to generic PLA (GFL99).
