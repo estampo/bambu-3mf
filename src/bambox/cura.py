@@ -140,14 +140,12 @@ def build_template_context(
     if "BED_TEMP" in headers:
         bed = int(headers["BED_TEMP"])
         ctx["bed_temperature_initial_layer_single"] = bed
-        ctx["bed_temperature"] = ctx.get("bed_temperature", [bed])
-        ctx["bed_temperature_initial_layer"] = ctx.get("bed_temperature_initial_layer", [bed])
+        ctx["bed_temperature"] = [bed]
+        ctx["bed_temperature_initial_layer"] = [bed]
 
     if "NOZZLE_TEMP" in headers:
         nozzle = int(headers["NOZZLE_TEMP"])
-        ctx["nozzle_temperature_initial_layer"] = ctx.get(
-            "nozzle_temperature_initial_layer", [nozzle]
-        )
+        ctx["nozzle_temperature_initial_layer"] = [nozzle]
 
     if "NOZZLE_DIAMETER" in headers:
         ctx["nozzle_diameter"] = float(headers["NOZZLE_DIAMETER"])
