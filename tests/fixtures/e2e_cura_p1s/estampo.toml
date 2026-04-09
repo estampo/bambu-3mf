@@ -1,8 +1,8 @@
 # CuraEngine multi-filament example — Bambu P1S with AMS
 #
 # Adapted from estampo/examples/cura-ams-p1s/estampo.toml for bambox e2e
-# testing. Uses bambox's bundled bambox_p1s_ams definition (resolved via
-# importlib.resources when bambox is installed).
+# testing. Definition files are bundled in profiles/cura/definitions/ so
+# this works without installing bambox as a Python package.
 #
 # Run via: estampo run tests/fixtures/e2e_cura_p1s/estampo.toml
 
@@ -21,8 +21,10 @@ version = "5.12.0"
 bed_type = "Textured PEI Plate"
 
 [slicer.cura]
-# Resolved by estampo via _find_in_bambox() → bambox/data/cura/
-printer = "bambox_p1s_ams"
+# bambox P1S AMS definition: 4-extruder machine with BAMBOX header contract.
+# The definition files are bundled in profiles/cura/definitions/ so this
+# test works without installing bambox as a Python package.
+printer = "profiles/cura/definitions/bambox_p1s_ams.def.json"
 
 # Per-slot filament types — drives material_type header and temperatures.
 # Slot 1 = white PLA, Slot 4 = black PLA (slots 2 and 3 unused).
