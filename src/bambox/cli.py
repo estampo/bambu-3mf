@@ -216,26 +216,7 @@ def _cmd_print(args: argparse.Namespace) -> None:
 
     device_id = args.device
     if not device_id:
-        # Try to get serial from credentials file
-        cpath = creds_path or Path.home() / ".config" / "estampo" / "credentials.toml"
-        if cpath.exists():
-            import tomllib
-
-            with open(cpath, "rb") as f:
-                raw = tomllib.load(f)
-            # Find the first bambu-cloud printer
-            for name, p in raw.get("printers", {}).items():
-                if p.get("serial"):
-                    device_id = p["serial"]
-                    print(f"Using printer '{name}' ({device_id})")
-                    break
-
-    if not device_id:
-        print(
-            "Error: --device is required (or set a printer serial in credentials.toml)",
-            file=sys.stderr,
-        )
-        sys.exit(1)
+        device_id, _ = _resolve_printer(getattr(args, "printer", None), creds_path)
 
     project_name = args.project or threemf.stem
 
@@ -286,10 +267,16 @@ def _cmd_status(args: argparse.Namespace) -> None:
     from bambox.bridge import _write_token_json, load_credentials, parse_ams_trays, query_status
 
     creds_path = Path(args.credentials) if args.credentials else None
+
+    # Resolve device serial: explicit flag, named printer, or first cloud printer
+    device_id = args.device
+    if not device_id:
+        device_id, _ = _resolve_printer(args.printer, creds_path)
+
     credentials = load_credentials(creds_path)
     token_file = _write_token_json(credentials)
     try:
-        status = query_status(args.device, token_file, verbose=args.verbose)
+        status = query_status(device_id, token_file, verbose=args.verbose)
         # Show key info
         state = status.get("gcode_state", "?")
         nozzle = status.get("nozzle_temper", "?")
@@ -313,6 +300,138 @@ def _cmd_status(args: argparse.Namespace) -> None:
             token_file.unlink()
         except OSError:
             pass
+
+
+def _resolve_printer(printer_name: str | None, creds_path: Path | None) -> tuple[str, str]:
+    """Resolve a printer name to (serial, display_name).
+
+    Tries: named printer from credentials, then first cloud printer found.
+    """
+    import tomllib
+
+    # Determine which credentials file to read
+    if creds_path:
+        path = creds_path
+    else:
+        from bambox.credentials import _credentials_path
+
+        path = _credentials_path()
+
+    if printer_name:
+        if not path.exists():
+            print(f"Error: credentials file not found: {path}", file=sys.stderr)
+            sys.exit(1)
+        with open(path, "rb") as f:
+            raw = tomllib.load(f)
+        printers = raw.get("printers", {})
+        if printer_name not in printers:
+            print(f"Error: printer '{printer_name}' not found", file=sys.stderr)
+            sys.exit(1)
+        serial = printers[printer_name].get("serial", "")
+        if not serial:
+            print(f"Error: printer '{printer_name}' has no serial number", file=sys.stderr)
+            sys.exit(1)
+        return serial, printer_name
+
+    # No name given — try to find the first cloud printer
+    if path.exists():
+        with open(path, "rb") as f:
+            raw = tomllib.load(f)
+        for name, p in raw.get("printers", {}).items():
+            if p.get("serial"):
+                print(f"Using printer '{name}' ({p['serial']})")
+                return p["serial"], name
+
+    print(
+        "Error: no printer configured. Run 'bambox login' or use --device.",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+
+def _cmd_login(args: argparse.Namespace) -> None:
+    """Log in to Bambu Cloud and configure printers."""
+    import getpass
+    import os
+
+    from bambox.auth import _get_user_profile, _login
+    from bambox.credentials import load_cloud_credentials, save_cloud_credentials
+
+    # Check for existing valid token
+    cloud = load_cloud_credentials()
+    if cloud and cloud.get("token"):
+        try:
+            profile = _get_user_profile(cloud["token"])
+            print(f"Already logged in as {profile.get('name') or profile['uid']}")
+            answer = input("  Re-login? [y/N] ").strip().lower()
+            if answer != "y":
+                # Still offer to configure printers
+                _name_printers(cloud["token"])
+                return
+        except (OSError, KeyError):
+            print("  Cached token is invalid or expired.")
+
+    # Get credentials from env vars or prompt
+    email = os.environ.get("BAMBU_EMAIL") or input("  Email: ").strip()
+    password = os.environ.get("BAMBU_PASSWORD") or getpass.getpass("  Password: ")
+    if not email or not password:
+        print("Error: email and password required", file=sys.stderr)
+        sys.exit(1)
+
+    token, refresh_token = _login(email, password)
+    profile = _get_user_profile(token)
+
+    save_cloud_credentials(
+        token=token,
+        refresh_token=refresh_token,
+        email=email,
+        uid=profile["uid"],
+    )
+
+    print(f"Login successful! User: {profile.get('name') or profile['uid']}")
+
+    # Name printers
+    _name_printers(token)
+
+
+def _name_printers(token: str) -> None:
+    """List bound printers and let user name up to 5."""
+    from bambox.auth import _get_devices
+    from bambox.credentials import mask_serial, save_printer
+
+    try:
+        devices = _get_devices(token)
+    except (OSError, KeyError):
+        print("  Could not fetch printer list.")
+        return
+
+    if not devices:
+        print("  No printers found on this account.")
+        return
+
+    # Show available printers
+    print(f"\n  Found {len(devices)} printer(s):")
+    for i, d in enumerate(devices, 1):
+        name = d.get("name", "unnamed")
+        model = d.get("dev_product_name", d.get("dev_model_name", "?"))
+        serial = d.get("dev_id", "?")
+        online = "online" if d.get("online") else "offline"
+        print(f"  {i}. {name} ({model}) — {mask_serial(serial)} [{online}]")
+
+    # Let user name up to 5 printers
+    limit = min(len(devices), 5)
+    print(f"\n  Name your printer(s) (up to {limit}). Press Enter to skip.")
+    for i in range(limit):
+        d = devices[i]
+        dev_name = d.get("name", f"printer-{i + 1}")
+        serial = d.get("dev_id", "")
+        default = dev_name.lower().replace(" ", "-")
+        raw = input(f"  Name for #{i + 1} [{default}] (enter '-' to skip): ").strip()
+        if raw == "-":
+            continue
+        name = raw or default
+        save_printer(name, {"type": "bambu-cloud", "serial": serial})
+        print(f"    Saved '{name}' ({mask_serial(serial)})")
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -362,15 +481,21 @@ def main(argv: list[str] | None = None) -> None:
         help="Filament type to regenerate settings (omit to patch existing settings only)",
     )
 
+    # --- login subcommand ---
+    sub.add_parser("login", help="Log in to Bambu Cloud and configure printers")
+
     # --- print subcommand ---
     print_p = sub.add_parser("print", help="Send .gcode.3mf to printer via cloud bridge")
     print_p.add_argument("threemf", type=Path, help="Input .gcode.3mf file")
     print_p.add_argument("-d", "--device", default="", help="Printer serial number")
     print_p.add_argument(
+        "-p", "--printer", default=None, help="Named printer from credentials.toml"
+    )
+    print_p.add_argument(
         "-c",
         "--credentials",
         default=None,
-        help="Path to credentials.toml (default: ~/.config/estampo/credentials.toml)",
+        help="Path to credentials.toml",
     )
     print_p.add_argument("--project", default=None, help="Project name shown in cloud")
     print_p.add_argument("--timeout", type=int, default=180)
@@ -384,7 +509,10 @@ def main(argv: list[str] | None = None) -> None:
 
     # --- status subcommand ---
     status_p = sub.add_parser("status", help="Query printer status")
-    status_p.add_argument("device", help="Printer serial number")
+    status_p.add_argument("device", nargs="?", default="", help="Printer serial number")
+    status_p.add_argument(
+        "-p", "--printer", default=None, help="Named printer from credentials.toml"
+    )
     status_p.add_argument(
         "-c",
         "--credentials",
@@ -401,6 +529,8 @@ def main(argv: list[str] | None = None) -> None:
         _cmd_pack(args)
     elif args.command == "repack":
         _cmd_repack(args)
+    elif args.command == "login":
+        _cmd_login(args)
     elif args.command == "print":
         _cmd_print(args)
     elif args.command == "status":

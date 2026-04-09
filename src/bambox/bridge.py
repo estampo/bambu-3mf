@@ -41,18 +41,28 @@ DOCKER_IMAGE = "estampo/cloud-bridge:bambu-02.05.00.00"
 def load_credentials(path: Path | None = None) -> dict[str, str]:
     """Load cloud credentials from a TOML file.
 
-    Looks in *path* or ``~/.config/estampo/credentials.toml`` by default.
+    Uses the credentials module for path resolution (bambox path first,
+    estampo fallback).  If *path* is given explicitly, reads that file
+    directly for backward compatibility.
+
     Returns dict with keys: token, refresh_token, email, uid.
     """
-    if path is None:
-        path = Path.home() / ".config" / "estampo" / "credentials.toml"
-    if not path.exists():
-        raise FileNotFoundError(f"Credentials file not found: {path}")
-    with open(path, "rb") as f:
-        raw = tomllib.load(f)
-    cloud = raw.get("cloud")
-    if not cloud or not cloud.get("token"):
-        raise ValueError(f"No [cloud] credentials in {path}")
+    if path is not None:
+        # Explicit path — read directly (backward compat)
+        if not path.exists():
+            raise FileNotFoundError(f"Credentials file not found: {path}")
+        with open(path, "rb") as f:
+            raw = tomllib.load(f)
+        cloud = raw.get("cloud")
+        if not cloud or not cloud.get("token"):
+            raise ValueError(f"No [cloud] credentials in {path}")
+        return cloud
+
+    from bambox.credentials import load_cloud_credentials
+
+    cloud = load_cloud_credentials()
+    if not cloud:
+        raise ValueError("No cloud credentials found.\nRun 'bambox login' to log in.")
     return cloud
 
 

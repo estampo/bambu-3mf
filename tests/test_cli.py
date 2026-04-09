@@ -363,7 +363,7 @@ class TestCmdPrint:
         with patch("bambox.bridge.load_credentials", return_value=creds):
             with pytest.raises(SystemExit, match="1"):
                 main(["print", str(threemf), "-c", str(creds_file)])
-        assert "--device is required" in capsys.readouterr().err
+        assert "no printer configured" in capsys.readouterr().err
 
     def test_print_device_from_credentials_file(self, tmp_path: Path) -> None:
         threemf = tmp_path / "test.gcode.3mf"
