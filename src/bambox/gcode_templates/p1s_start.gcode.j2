@@ -59,7 +59,7 @@ M620 S{{ initial_extruder }}A   ; switch material if AMS exist
     G1 Y265
     M400
 M621 S{{ initial_extruder }}A
-M620.1 E F{{ (filament_max_volumetric_speed[initial_extruder]/2.4053*60)|round|int }} T{{ nozzle_temperature_range_high[initial_extruder] }}
+M620.1 E F{{ (filament_max_volumetric_speed[initial_extruder]/filament_area*60)|round|int }} T{{ nozzle_temperature_range_high[initial_extruder] }}
 
 
 M412 S1 ; ===turn on filament runout detection===

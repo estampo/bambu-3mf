@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from bambox.gcode_compat import _FILAMENT_AREA
 from bambox.templates import orca_to_jinja2, render_template
 
 # ---------------------------------------------------------------------------
@@ -93,6 +94,7 @@ class TestRenderTemplate:
                 "outer_wall_volumetric_speed": 12,
                 "filament_max_volumetric_speed": [15],
                 "nozzle_temperature_range_high": [250],
+                "filament_area": _FILAMENT_AREA,
             },
         )
         # Should contain machine init commands
@@ -117,6 +119,7 @@ class TestRenderTemplate:
                 "outer_wall_volumetric_speed": 12,
                 "filament_max_volumetric_speed": [15],
                 "nozzle_temperature_range_high": [250],
+                "filament_area": _FILAMENT_AREA,
             },
         )
         assert "M106 P3 S180" in result
@@ -138,6 +141,7 @@ class TestRenderTemplate:
                 "outer_wall_volumetric_speed": 12,
                 "filament_max_volumetric_speed": [15],
                 "nozzle_temperature_range_high": [260],
+                "filament_area": _FILAMENT_AREA,
             },
         )
         # M106 P3 S180 only appears in the PLA block, should not be in PETG output
@@ -160,6 +164,7 @@ class TestRenderTemplate:
                 "outer_wall_volumetric_speed": 12,
                 "filament_max_volumetric_speed": [15],
                 "nozzle_temperature_range_high": [250],
+                "filament_area": _FILAMENT_AREA,
             },
         )
         assert "G29.1 Z" in result

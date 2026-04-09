@@ -20,10 +20,11 @@ Header format (emitted as G-code comments by the printer definition)::
 from __future__ import annotations
 
 import logging
-import math
 import re
 from dataclasses import dataclass
 from pathlib import Path
+
+from bambox.gcode_compat import _FILAMENT_AREA
 
 log = logging.getLogger(__name__)
 
@@ -274,6 +275,7 @@ def build_template_context(
     ctx.setdefault("outer_wall_volumetric_speed", 12)
     ctx.setdefault("filament_max_volumetric_speed", [12])
     ctx.setdefault("nozzle_temperature_range_high", [240])
+    ctx.setdefault("filament_area", _FILAMENT_AREA)
 
     return ctx
 
@@ -282,8 +284,6 @@ def build_template_context(
 # Slice statistics extraction
 # ---------------------------------------------------------------------------
 
-# PLA density ≈ 1.24 g/cm³; 1.75 mm filament → cross-section ≈ 2.4053 mm²
-_FILAMENT_AREA_MM2 = math.pi * (1.75 / 2.0) ** 2  # mm²
 _PLA_DENSITY_G_PER_MM3 = 0.00124  # g/mm³  (1.24 g/cm³)
 
 
@@ -331,7 +331,7 @@ def extract_slice_stats(gcode: str) -> SliceStats:
             total_mm += m_val * 1000  # convert m → mm
         stats.filament_used_m = metres
         # weight = length_mm × cross-section_mm² × density_g/mm³
-        stats.weight = round(total_mm * _FILAMENT_AREA_MM2 * _PLA_DENSITY_G_PER_MM3, 2)
+        stats.weight = round(total_mm * _FILAMENT_AREA * _PLA_DENSITY_G_PER_MM3, 2)
 
     # CuraEngine CLI often reports "Filament used: 0m" as a placeholder.
     # Compute from max absolute E position per G92-reset segment instead.
@@ -351,6 +351,6 @@ def extract_slice_stats(gcode: str) -> SliceStats:
                     segment_max = e_val
         total_length += segment_max  # last segment
         if total_length > 0:
-            stats.weight = round(total_length * _FILAMENT_AREA_MM2 * _PLA_DENSITY_G_PER_MM3, 2)
+            stats.weight = round(total_length * _FILAMENT_AREA * _PLA_DENSITY_G_PER_MM3, 2)
 
     return stats
