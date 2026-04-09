@@ -53,6 +53,9 @@ select = ["E", "F", "I", "W"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
+markers = [
+    "e2e: end-to-end tests requiring estampo CLI and Docker (deselect with '-m not e2e')",
+]
 
 [tool.mypy]
 python_version = "3.11"
