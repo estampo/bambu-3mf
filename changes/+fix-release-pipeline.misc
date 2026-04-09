@@ -1,0 +1,1 @@
+Fix release pipeline: reorder so PyPI publishes last (after GitHub Release), make github-release idempotent on retry, update prepare-release PR description.

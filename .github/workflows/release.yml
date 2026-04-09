@@ -155,34 +155,16 @@ jobs:
             echo "::notice::Created tag v${VERSION}"
           fi
 
-  # ── Publish to PyPI ─────────────────────────────────────────────────
-  publish-pypi:
+  # ── Create GitHub Release ───────────────────────────────────────────
+  # Runs before publish-pypi so PyPI is only published once everything else succeeds.
+  # Idempotent: updates an existing release rather than failing on retry.
+  github-release:
     needs: [version, create-tag, dry-run-publish]
     if: |
       always() &&
+      needs.version.result == 'success' &&
       needs.dry-run-publish.result == 'success' &&
       (needs.create-tag.result == 'success' || needs.create-tag.result == 'skipped')
-    runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-    steps:
-      - uses: actions/download-artifact@v7
-        with:
-          name: pypi-dist
-          path: dist/
-
-      - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          skip-existing: true
-
-  # ── Create GitHub Release ───────────────────────────────────────────
-  github-release:
-    needs: [version, publish-pypi]
-    if: |
-      always() &&
-      needs.version.result == 'success' &&
-      needs.publish-pypi.result == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -205,14 +187,43 @@ jobs:
           echo "Changelog body:"
           cat /tmp/release-body.md
 
-      - name: Create GitHub Release
+      - name: Create or update GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           VERSION="${{ needs.version.outputs.version }}"
           WHEEL=$(ls dist/*.whl 2>/dev/null | head -1)
-          ARGS=(gh release create "v${VERSION}" --title "v${VERSION}" --notes-file /tmp/release-body.md)
-          if [[ -n "$WHEEL" ]]; then
-            ARGS+=("$WHEEL")
+          if gh release view "v${VERSION}" >/dev/null 2>&1; then
+            echo "::notice::Release v${VERSION} already exists — updating"
+            gh release edit "v${VERSION}" --notes-file /tmp/release-body.md
+            if [[ -n "$WHEEL" ]]; then
+              gh release upload "v${VERSION}" "$WHEEL" --clobber
+            fi
+          else
+            ARGS=(gh release create "v${VERSION}" --title "v${VERSION}" --notes-file /tmp/release-body.md)
+            if [[ -n "$WHEEL" ]]; then
+              ARGS+=("$WHEEL")
+            fi
+            "${ARGS[@]}"
           fi
-          "${ARGS[@]}"
+
+  # ── Publish to PyPI — only after everything else succeeds ────────────
+  publish-pypi:
+    needs: [version, github-release]
+    if: |
+      always() &&
+      needs.version.result == 'success' &&
+      needs.github-release.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: pypi-dist
+          path: dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true

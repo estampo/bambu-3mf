@@ -108,7 +108,7 @@ jobs:
 
           ---
           **Merge this PR to trigger the release pipeline.**
-          The release workflow will auto-tag \`v${VERSION}\`, build all artifacts, validate on TestPyPI, then publish to PyPI.
+          The release workflow will build the package, validate on TestPyPI, create the tag, create the GitHub Release, then publish to PyPI.
           EOF
           )"
 
