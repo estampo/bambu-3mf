@@ -139,18 +139,28 @@ class TestParseBamboxHeaders:
             "; BAMBOX_END\n"
         )
         h = parse_bambox_headers(gcode)
-        assert h == {"PRINTER": "p1s"}
+        assert h["PRINTER"] == "p1s"
+        # Defaults are injected for missing machine-level headers
+        assert h["NOZZLE_DIAMETER"] == "0.4"
+        assert h["BED_TYPE"] == "Textured PEI Plate"
 
-    def test_warns_on_200_line_limit(self, caplog) -> None:
-        import logging
-
-        lines = [f"; line {i}" for i in range(202)]
-        lines[0] = "; BAMBOX_PRINTER=p1s"
-        gcode = "\n".join(lines)
-        with caplog.at_level(logging.WARNING, logger="bambox.cura"):
-            h = parse_bambox_headers(gcode)
-        assert h == {"PRINTER": "p1s"}
-        assert "exceeded 200 lines" in caplog.text
+    def test_full_scan_finds_filament_headers_after_bambox_end(self) -> None:
+        """Per-extruder headers (FILAMENT_SLOT/TYPE) appear at tool-change
+        points throughout the file, well past the machine_start_gcode block.
+        parse_bambox_headers must scan the entire file for these keys."""
+        gcode = (
+            "; BAMBOX_PRINTER=p1s\n"
+            "; BAMBOX_BED_TEMP=60\n"
+            "; BAMBOX_ASSEMBLE=true\n"
+            "; BAMBOX_FILAMENT_SLOT=0\n"
+            "; BAMBOX_FILAMENT_TYPE=PLA\n"
+            "; BAMBOX_END\n" + "G1 X0 Y0\n" * 500 + "; BAMBOX_FILAMENT_SLOT=3\n"
+            "; BAMBOX_FILAMENT_TYPE=PLA\n"
+        )
+        h = parse_bambox_headers(gcode)
+        assert h["PRINTER"] == "p1s"
+        assert h["FILAMENT_SLOT"] == "0,3"
+        assert h["FILAMENT_TYPE"] == "PLA,PLA"
 
 
 class TestStripBamboxHeader:
@@ -350,16 +360,19 @@ class TestPackWithBamboxHeaders:
             assert ps["filament_type"][0] == "PETG-CF"
 
     def test_slot_mapping_from_headers(self, tmp_path: Path) -> None:
-        """BAMBOX_FILAMENT_SLOT headers auto-configure slot assignment."""
+        """BAMBOX_FILAMENT_SLOT headers auto-configure slot assignment.
+
+        CuraEngine emits paired SLOT+TYPE in machine_extruder_start_code."""
         gcode_file = tmp_path / "slot_header.gcode"
         gcode_file.write_text(
             "; BAMBOX_PRINTER=p1s\n"
             "; BAMBOX_FILAMENT_SLOT=0\n"
-            "; BAMBOX_FILAMENT_SLOT=2\n"
             "; BAMBOX_FILAMENT_TYPE=PLA\n"
+            "G28\nG1 Z0.2 F1200\n"
+            "; BAMBOX_FILAMENT_SLOT=2\n"
             "; BAMBOX_FILAMENT_TYPE=PETG-CF\n"
             "; BAMBOX_END\n"
-            "G28\nG1 Z0.2 F1200\nG1 X10 Y10 E1 F600\n"
+            "G1 X10 Y10 E1 F600\n"
         )
         output = tmp_path / "slot_header.gcode.3mf"
 
