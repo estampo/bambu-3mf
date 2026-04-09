@@ -19,7 +19,10 @@ Header format (emitted as G-code comments by the printer definition)::
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
+
+log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Printer definitions
@@ -63,6 +66,11 @@ def parse_bambox_headers(gcode: str) -> dict[str, str]:
     result: dict[str, str] = {}
     for i, line in enumerate(gcode.splitlines()):
         if i > 200:
+            log.warning(
+                "BAMBOX header block exceeded 200 lines without a ; BAMBOX_END "
+                "terminator — some headers may have been missed. "
+                "Check machine_start_gcode."
+            )
             break
         stripped = line.strip()
         if stripped == "; BAMBOX_END":

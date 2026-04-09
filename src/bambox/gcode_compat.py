@@ -18,9 +18,12 @@ translations.  OrcaSlicer / BambuStudio G-code is returned unchanged.
 
 from __future__ import annotations
 
+import logging
 import math
 import re
 from bisect import bisect_right
+
+log = logging.getLogger(__name__)
 
 _FILAMENT_DIAMETER = 1.75  # mm — standard; change to 2.85 for bowden setups
 _DEFAULT_FLUSH_VOLUME = 280.0  # mm³ — BambuStudio default per-transition volume
@@ -440,10 +443,31 @@ def _compute_flush_lengths(
             try:
                 volume = float(matrix_raw[from_ext * n + to_ext])
             except (ValueError, TypeError):
+                log.warning(
+                    "flush_volumes_matrix[%d→%d] is not numeric — using default %.0f mm³",
+                    from_ext,
+                    to_ext,
+                    _DEFAULT_FLUSH_VOLUME,
+                )
                 volume = _DEFAULT_FLUSH_VOLUME
         else:
+            log.warning(
+                "flush_volumes_matrix has invalid dimensions or extruder index "
+                "out of range (from=%d, to=%d, matrix size=%d) — "
+                "using default %.0f mm³",
+                from_ext,
+                to_ext,
+                len(matrix_raw),
+                _DEFAULT_FLUSH_VOLUME,
+            )
             volume = _DEFAULT_FLUSH_VOLUME
     else:
+        log.warning(
+            "flush_volumes_matrix missing or empty in project settings — "
+            "using default %.0f mm³ for all transitions. "
+            "Set flush_volumes_matrix in your machine profile for accurate purging.",
+            _DEFAULT_FLUSH_VOLUME,
+        )
         volume = _DEFAULT_FLUSH_VOLUME
 
     multiplier_raw = project_settings.get("flush_multiplier", "0.3")

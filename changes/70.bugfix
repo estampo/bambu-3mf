@@ -1,0 +1,1 @@
+Log a warning when ``flush_volumes_matrix`` is missing, malformed, or contains non-numeric values instead of silently falling back to the 280 mm³ default.

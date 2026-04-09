@@ -141,6 +141,17 @@ class TestParseBamboxHeaders:
         h = parse_bambox_headers(gcode)
         assert h == {"PRINTER": "p1s"}
 
+    def test_warns_on_200_line_limit(self, caplog) -> None:
+        import logging
+
+        lines = [f"; line {i}" for i in range(202)]
+        lines[0] = "; BAMBOX_PRINTER=p1s"
+        gcode = "\n".join(lines)
+        with caplog.at_level(logging.WARNING, logger="bambox.cura"):
+            h = parse_bambox_headers(gcode)
+        assert h == {"PRINTER": "p1s"}
+        assert "exceeded 200 lines" in caplog.text
+
 
 class TestStripBamboxHeader:
     def test_strips_header_lines(self) -> None:

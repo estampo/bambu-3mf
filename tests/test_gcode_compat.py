@@ -400,6 +400,38 @@ def test_compute_flush_lengths_defaults_without_matrix():
     assert 34.0 < total < 36.0
 
 
+def test_compute_flush_warns_when_matrix_missing(caplog):
+    """Should log a warning when flush_volumes_matrix is missing."""
+    import logging
+
+    settings: dict[str, object] = {}
+    with caplog.at_level(logging.WARNING, logger="bambox.gcode_compat"):
+        _compute_flush_lengths(settings, 0, 1)
+    assert "flush_volumes_matrix missing" in caplog.text
+
+
+def test_compute_flush_warns_on_invalid_dimensions(caplog):
+    """Should log a warning when matrix dimensions are wrong."""
+    import logging
+
+    settings: dict[str, object] = {"flush_volumes_matrix": [1, 2, 3]}  # not square
+    with caplog.at_level(logging.WARNING, logger="bambox.gcode_compat"):
+        _compute_flush_lengths(settings, 0, 1)
+    assert "invalid dimensions" in caplog.text
+
+
+def test_compute_flush_warns_on_non_numeric_value(caplog):
+    """Should log a warning when matrix value is not numeric."""
+    import logging
+
+    settings: dict[str, object] = {"flush_volumes_matrix": ["bad", 0, 0, 0]}
+    with caplog.at_level(logging.WARNING, logger="bambox.gcode_compat"):
+        _compute_flush_lengths(settings, 0, 0)
+    # Same-to-same is index 0 which is "bad"
+    _compute_flush_lengths(settings, 0, 1)
+    assert "not numeric" in caplog.text
+
+
 def test_rewrite_detects_initial_extruder():
     """If G-code starts with T1 before the first tool change, previous_ext should be 1."""
     gcode = "G28\nT1\nG1 Z0.2 F3000\nG1 X10 Y10 E1 F600\nT0\nG1 X20 Y20 E2 F600\n"
