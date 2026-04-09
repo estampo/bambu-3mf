@@ -332,10 +332,10 @@ def fixup_project_settings(
     Called automatically by :func:`pack_gcode_3mf`. Also useful standalone
     for patching existing 3MF archives.
     """
-    result = dict(settings)
+    result = {k: (list(v) if isinstance(v, list) else v) for k, v in settings.items()}
     for key, default in _BC_REQUIRED_KEYS.items():
         if key not in result:
-            result[key] = default
+            result[key] = list(default) if isinstance(default, list) else default
     for key, val in result.items():
         if isinstance(val, list) and 0 < len(val) < min_slots:
             while len(val) < min_slots:

@@ -2,14 +2,21 @@
 
 from __future__ import annotations
 
+import io
 import json
 import subprocess
+import xml.etree.ElementTree as ET
 import zipfile
 from unittest.mock import patch
 
 import pytest
 
-from bambox.bridge import _build_ams_mapping, _find_local_bridge, _run_bridge_local
+from bambox.bridge import (
+    _build_ams_mapping,
+    _find_local_bridge,
+    _patch_config_3mf_colors,
+    _run_bridge_local,
+)
 
 
 class TestFindLocalBridge:
@@ -167,3 +174,125 @@ class TestBuildAmsMapping:
 
         with pytest.raises(RuntimeError, match="Filament slot 2.*no matching AMS tray"):
             _build_ams_mapping(threemf, ams_trays)
+
+
+def _make_namespaced_3mf(path, filaments, namespace, project_settings=None):
+    """Create a minimal 3MF with a namespaced slice_info.config."""
+    slice_info = f'<config xmlns="{namespace}">\n  <plate>\n'
+    for fid, ftype, color in filaments:
+        slice_info += f'    <filament id="{fid}" type="{ftype}" color="#{color}" />\n'
+    slice_info += "  </plate>\n</config>"
+
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr("Metadata/slice_info.config", slice_info)
+        if project_settings is not None:
+            z.writestr(
+                "Metadata/project_settings.config",
+                json.dumps(project_settings),
+            )
+
+
+class TestBuildAmsMappingNamespaced:
+    """Verify _build_ams_mapping handles XML with a default namespace."""
+
+    def test_namespaced_xml_maps_correctly(self, tmp_path):
+        threemf = tmp_path / "ns.3mf"
+        _make_namespaced_3mf(
+            threemf,
+            [(1, "PLA", "FF0000")],
+            namespace="http://example.com/bambu",
+        )
+
+        ams_trays = [
+            {
+                "phys_slot": 2,
+                "ams_id": 0,
+                "slot_id": 2,
+                "type": "PLA",
+                "color": "FF0000",
+                "tray_info_idx": "",
+            },
+        ]
+
+        result = _build_ams_mapping(threemf, ams_trays)
+        assert result["amsMapping"] == [2]
+        assert result["amsMapping2"] == [{"ams_id": 0, "slot_id": 2}]
+
+    def test_namespaced_xml_unmatched_raises(self, tmp_path):
+        threemf = tmp_path / "ns.3mf"
+        _make_namespaced_3mf(
+            threemf,
+            [(1, "PLA", "FF0000")],
+            namespace="http://example.com/bambu",
+        )
+
+        ams_trays = [
+            {
+                "phys_slot": 0,
+                "ams_id": 0,
+                "slot_id": 0,
+                "type": "PETG",
+                "color": "00FF00",
+                "tray_info_idx": "",
+            },
+        ]
+
+        with pytest.raises(RuntimeError, match="Filament slot 1.*no matching AMS tray"):
+            _build_ams_mapping(threemf, ams_trays)
+
+
+class TestPatchConfigColors:
+    """Verify _patch_config_3mf_colors handles namespaced XML."""
+
+    def _make_config_bytes(self, filaments, namespace=None):
+        """Build a config-only 3MF in memory."""
+        if namespace:
+            xml = f'<config xmlns="{namespace}">\n  <plate>\n'
+        else:
+            xml = "<config>\n  <plate>\n"
+        for fid, ftype, color in filaments:
+            xml += f'    <filament id="{fid}" type="{ftype}" color="#{color}" />\n'
+        xml += "  </plate>\n</config>"
+
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as z:
+            z.writestr("Metadata/slice_info.config", xml)
+        return buf.getvalue()
+
+    def test_patches_colors_no_namespace(self, tmp_path):
+        config = self._make_config_bytes([(1, "PLA", "FF0000")])
+        ams_trays = [
+            {"phys_slot": 0, "ams_id": 0, "slot_id": 0, "type": "PLA", "color": "00FF00"},
+        ]
+        mapping = [0]
+        source = tmp_path / "dummy.3mf"
+        source.touch()
+
+        patched = _patch_config_3mf_colors(config, source, ams_trays, mapping)
+        with zipfile.ZipFile(io.BytesIO(patched), "r") as z:
+            root = ET.fromstring(z.read("Metadata/slice_info.config"))
+            ns = ""
+            if root.tag.startswith("{"):
+                ns = root.tag[: root.tag.index("}") + 1]
+            fil = root.find(f"{ns}plate").find(f"{ns}filament")
+            assert fil.get("color") == "#00FF00"
+
+    def test_patches_colors_with_namespace(self, tmp_path):
+        config = self._make_config_bytes(
+            [(1, "PLA", "FF0000")], namespace="http://example.com/bambu"
+        )
+        ams_trays = [
+            {"phys_slot": 0, "ams_id": 0, "slot_id": 0, "type": "PLA", "color": "00FF00"},
+        ]
+        mapping = [0]
+        source = tmp_path / "dummy.3mf"
+        source.touch()
+
+        patched = _patch_config_3mf_colors(config, source, ams_trays, mapping)
+        with zipfile.ZipFile(io.BytesIO(patched), "r") as z:
+            root = ET.fromstring(z.read("Metadata/slice_info.config"))
+            ns = ""
+            if root.tag.startswith("{"):
+                ns = root.tag[: root.tag.index("}") + 1]
+            fil = root.find(f"{ns}plate").find(f"{ns}filament")
+            assert fil.get("color") == "#00FF00"

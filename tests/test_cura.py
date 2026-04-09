@@ -176,6 +176,27 @@ class TestBuildTemplateContext:
         ctx = build_template_context(headers, settings)
         assert ctx["bed_temperature_initial_layer_single"] == 70
 
+    def test_bed_temp_header_overrides_existing_array(self) -> None:
+        """BED_TEMP header must override pre-existing bed_temperature arrays."""
+        headers = {"BED_TEMP": "80"}
+        settings: dict[str, object] = {
+            "bed_temperature": [55],
+            "bed_temperature_initial_layer": [55],
+        }
+        ctx = build_template_context(headers, settings)
+        assert ctx["bed_temperature"] == [80]
+        assert ctx["bed_temperature_initial_layer"] == [80]
+        assert ctx["bed_temperature_initial_layer_single"] == 80
+
+    def test_nozzle_temp_header_overrides_existing_array(self) -> None:
+        """NOZZLE_TEMP header must override pre-existing nozzle_temperature_initial_layer."""
+        headers = {"NOZZLE_TEMP": "260"}
+        settings: dict[str, object] = {
+            "nozzle_temperature_initial_layer": [200],
+        }
+        ctx = build_template_context(headers, settings)
+        assert ctx["nozzle_temperature_initial_layer"] == [260]
+
     def test_defaults_present(self) -> None:
         ctx = build_template_context({}, {})
         assert ctx["initial_extruder"] == 0
@@ -231,8 +252,8 @@ class TestPackWithBamboxHeaders:
             # BAMBOX headers stripped
             assert "; BAMBOX_PRINTER" not in gcode
 
-    def test_cli_flags_override_headers(self, tmp_path: Path) -> None:
-        """Explicit --filament flag overrides BAMBOX_FILAMENT_TYPE header."""
+    def test_headers_override_cli_filament(self, tmp_path: Path) -> None:
+        """BAMBOX_FILAMENT_TYPE header takes precedence over --filament flag."""
         gcode_file = tmp_path / "cura_output.gcode"
         gcode_file.write_text(
             "; BAMBOX_PRINTER=p1s\n"
@@ -246,8 +267,8 @@ class TestPackWithBamboxHeaders:
 
         with zipfile.ZipFile(output) as z:
             ps = json.loads(z.read("Metadata/project_settings.config"))
-            # CLI flag should win
-            assert ps["filament_type"][0] == "PETG-CF"
+            # Header should win over CLI flag
+            assert ps["filament_type"][0] == "PLA"
 
     def test_multi_filament_from_headers(self, tmp_path: Path) -> None:
         """Multiple BAMBOX_FILAMENT_TYPE headers become multi-filament."""

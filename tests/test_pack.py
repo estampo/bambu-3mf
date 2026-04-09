@@ -422,6 +422,30 @@ class TestHelpers:
         assert padded["filament_type"] == ["PLA", "PETG", "PETG", "PETG", "PETG"]
         assert padded["speed"] == "100"
 
+    def test_fixup_does_not_mutate_caller_dict(self) -> None:
+        original_list = ["PLA", "PETG"]
+        settings: dict[str, object] = {
+            "filament_type": original_list,
+            "speed": "100",
+        }
+        fixup_project_settings(settings)
+        assert original_list == ["PLA", "PETG"], "caller's list was mutated"
+        assert settings["filament_type"] == ["PLA", "PETG"], "caller's dict was mutated"
+
+    def test_fixup_does_not_mutate_bc_required_keys(self) -> None:
+        from bambox.pack import _BC_REQUIRED_KEYS
+
+        snapshots = {k: list(v) if isinstance(v, list) else v for k, v in _BC_REQUIRED_KEYS.items()}
+        fixup_project_settings({})
+        fixup_project_settings({})  # second call to detect accumulated mutation
+        for k, v in _BC_REQUIRED_KEYS.items():
+            assert v == snapshots[k], f"_BC_REQUIRED_KEYS[{k!r}] was mutated"
+
+    def test_fixup_returns_padded_arrays(self) -> None:
+        settings: dict[str, object] = {"filament_colour": ["#FF0000"]}
+        result = fixup_project_settings(settings, min_slots=5)
+        assert result["filament_colour"] == ["#FF0000"] * 5
+
 
 # ---------------------------------------------------------------------------
 # File output
