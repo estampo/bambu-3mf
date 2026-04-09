@@ -1,0 +1,1 @@
+Add 12 tests for bridge.py Docker invocation paths (bind-mount, baked fallback, error handling).

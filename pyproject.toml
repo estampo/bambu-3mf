@@ -30,6 +30,9 @@ dev = [
     "pillow>=10.0.0",
     "towncrier>=24.7.0",
 ]
+docs = [
+    "pdoc>=14.0.0",
+]
 
 [project.scripts]
 bambox = "bambox.cli:main"
