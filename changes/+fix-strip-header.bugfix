@@ -1,0 +1,1 @@
+``strip_bambox_header`` now only removes the leading header block instead of stripping ``; BAMBOX_*`` comments from the entire file.

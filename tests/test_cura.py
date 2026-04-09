@@ -173,6 +173,14 @@ class TestStripBamboxHeader:
         gcode = "G28\nG1 Z0.2\n"
         assert strip_bambox_header(gcode) == gcode
 
+    def test_preserves_bambox_comments_after_header(self) -> None:
+        gcode = "; BAMBOX_PRINTER=p1s\n; BAMBOX_END\nG28\n; BAMBOX_MACRO=something\nG1 Z0.2\n"
+        result = strip_bambox_header(gcode)
+        assert "; BAMBOX_PRINTER" not in result
+        assert "; BAMBOX_END" not in result
+        assert "; BAMBOX_MACRO=something\n" in result
+        assert "G28\n" in result
+
 
 class TestBuildTemplateContext:
     def test_maps_header_temps(self) -> None:

@@ -1,0 +1,1 @@
+Add ``pythonpath = ["src"]`` to pytest config so tests work without editable install.

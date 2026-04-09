@@ -121,6 +121,10 @@ class TestAssignFilamentSlots:
             (2, "PETG", "#000"),
         ]
 
+    def test_duplicate_explicit_slot_raises(self) -> None:
+        with pytest.raises(ValueError, match="Duplicate filament slot 0"):
+            _assign_filament_slots([(0, "PLA", "#FFF"), (0, "PETG", "#000")])
+
     def test_all_explicit(self) -> None:
         result = _assign_filament_slots(
             [

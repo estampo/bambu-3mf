@@ -90,17 +90,25 @@ def parse_bambox_headers(gcode: str) -> dict[str, str]:
 
 
 def strip_bambox_header(gcode: str) -> str:
-    """Remove the BAMBOX header block from G-code.
+    """Remove the leading BAMBOX header block from G-code.
 
-    Strips all ``; BAMBOX_*`` lines and ``; BAMBOX_END`` from the top of
-    the G-code, returning the raw toolpath ready for assembly.
+    Strips ``; BAMBOX_*`` lines and ``; BAMBOX_END`` from the contiguous
+    header section at the top of the file only.  Once a non-BAMBOX,
+    non-empty line is seen, the rest of the file is kept as-is.
     """
     lines = gcode.splitlines(keepends=True)
     out: list[str] = []
+    in_header = True
     for line in lines:
         stripped = line.strip()
-        if stripped.startswith("; BAMBOX_") or stripped == "; BAMBOX_END":
-            continue
+        if in_header:
+            if stripped.startswith("; BAMBOX_") or stripped == "; BAMBOX_END":
+                continue
+            if stripped == "" or stripped.startswith(";"):
+                # Skip blank lines and other comments within the header block
+                out.append(line)
+                continue
+            in_header = False
         out.append(line)
     return "".join(out)
 
