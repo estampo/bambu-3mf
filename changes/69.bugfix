@@ -1,0 +1,1 @@
+Log a warning when ``parse_bambox_headers`` hits the 200-line limit without a ``; BAMBOX_END`` terminator instead of silently truncating.
