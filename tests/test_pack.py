@@ -428,6 +428,178 @@ class TestHelpers:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# BBS 02.05+ optional metadata in slice_info
+# ---------------------------------------------------------------------------
+
+
+class TestSliceInfoOptionalFields:
+    def test_extruder_type_and_nozzle_volume_type(self) -> None:
+        """Lines 225-229: extruder_type and nozzle_volume_type in slice_info XML."""
+        info = SliceInfo(
+            extruder_type=1,
+            nozzle_volume_type=2,
+            filaments=[FilamentInfo()],
+        )
+        xml = _slice_info_xml(info)
+        root = ET.fromstring(xml)
+        meta = {m.get("key"): m.get("value") for m in root.findall(".//metadata")}
+        assert meta["extruder_type"] == "1"
+        assert meta["nozzle_volume_type"] == "2"
+
+    def test_first_layer_time(self) -> None:
+        """Line 244: first_layer_time in slice_info XML."""
+        info = SliceInfo(
+            first_layer_time=42.5,
+            filaments=[FilamentInfo()],
+        )
+        xml = _slice_info_xml(info)
+        root = ET.fromstring(xml)
+        meta = {m.get("key"): m.get("value") for m in root.findall(".//metadata")}
+        assert meta["first_layer_time"] == "42.5"
+
+    def test_limit_filament_maps(self) -> None:
+        """Line 256: limit_filament_maps in slice_info XML."""
+        info = SliceInfo(
+            limit_filament_maps="0 0 0 0 0",
+            filaments=[FilamentInfo()],
+        )
+        xml = _slice_info_xml(info)
+        root = ET.fromstring(xml)
+        meta = {m.get("key"): m.get("value") for m in root.findall(".//metadata")}
+        assert meta["limit_filament_maps"] == "0 0 0 0 0"
+
+    def test_layer_filament_lists(self) -> None:
+        """Lines 285-291: layer_filament_lists in slice_info XML."""
+        info = SliceInfo(
+            layer_filament_lists=[
+                {"filament_list": "1 2", "layer_ranges": "0-10"},
+                {"filament_list": "2 3", "layer_ranges": "11-20"},
+            ],
+            filaments=[FilamentInfo()],
+        )
+        xml = _slice_info_xml(info)
+        root = ET.fromstring(xml)
+        lfl = root.findall(".//layer_filament_list")
+        assert len(lfl) == 2
+        assert lfl[0].get("filament_list") == "1 2"
+        assert lfl[0].get("layer_ranges") == "0-10"
+        assert lfl[1].get("filament_list") == "2 3"
+
+    def test_filament_volume_maps_in_model_settings(self) -> None:
+        """Line 101: filament_volume_maps passed to model_settings."""
+        from bambox.pack import _model_settings_xml
+
+        xml = _model_settings_xml("1 1 1 1 1", filament_volume_maps="0 0 0 0 0")
+        assert 'key="filament_volume_maps"' in xml
+        assert 'value="0 0 0 0 0"' in xml
+
+
+# ---------------------------------------------------------------------------
+# plate_json with plate_data passthrough
+# ---------------------------------------------------------------------------
+
+
+class TestPlateJson:
+    def test_plate_data_passthrough(self) -> None:
+        """Line 311: plate_data should be used as base when provided."""
+        from bambox.pack import _plate_json
+
+        info = SliceInfo(
+            plate_data={"custom_key": "custom_value", "version": 99},
+        )
+        result = json.loads(_plate_json(info, []))
+        assert result["custom_key"] == "custom_value"
+        assert result["version"] == 99  # from plate_data, not default
+        # Defaults should still fill in missing keys
+        assert "is_seq_print" in result
+
+
+# ---------------------------------------------------------------------------
+# Extra files in pack_gcode_3mf
+# ---------------------------------------------------------------------------
+
+
+class TestExtraFiles:
+    def test_extra_files_included(self) -> None:
+        """Lines 637-638: extra_files should be written to the archive."""
+        z = _pack(extra_files={"Metadata/top_1.png": b"\x89PNGextra"})
+        assert z.read("Metadata/top_1.png") == b"\x89PNGextra"
+
+
+# ---------------------------------------------------------------------------
+# repack_3mf edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestRepack3mf:
+    def _make_3mf(self, tmp_path: Path, **extra_entries: bytes) -> Path:
+        """Create a minimal .gcode.3mf for repack testing."""
+        out = tmp_path / "test.gcode.3mf"
+        with zipfile.ZipFile(out, "w") as z:
+            z.writestr("Metadata/plate_1.gcode", b"G28\nG1 Z0.2\n")
+            z.writestr(
+                "Metadata/model_settings.config",
+                '<?xml version="1.0"?>\n<config><plate>'
+                '<metadata key="filament_maps" value="1"/>'
+                '<metadata key="gcode_file" value="Metadata/plate_1.gcode"/>'
+                "</plate></config>\n",
+            )
+            for name, data in extra_entries.items():
+                z.writestr(name, data)
+        return out
+
+    def test_repack_no_project_settings(self, tmp_path: Path) -> None:
+        """Lines 408-409, 423: repack with no existing project_settings and no machine."""
+        from bambox.pack import repack_3mf
+
+        out = self._make_3mf(tmp_path)
+        repack_3mf(out)
+        with zipfile.ZipFile(out) as z:
+            # model_settings should be patched (filament_maps padded)
+            ms = z.read("Metadata/model_settings.config").decode()
+            assert 'value="1 1 1 1 1"' in ms
+
+    def test_repack_with_machine_and_filaments(self, tmp_path: Path) -> None:
+        """Lines 411-419: repack regenerates project_settings from profiles."""
+        from bambox.pack import repack_3mf
+
+        out = self._make_3mf(tmp_path)
+        repack_3mf(out, machine="p1s", filaments=["PLA"])
+        with zipfile.ZipFile(out) as z:
+            ps = json.loads(z.read("Metadata/project_settings.config"))
+            assert isinstance(ps, dict)
+            assert len(ps) > 400
+
+    def test_repack_no_model_settings(self, tmp_path: Path) -> None:
+        """Lines 429-430: repack when model_settings.config is missing."""
+        from bambox.pack import repack_3mf
+
+        out = tmp_path / "no_ms.gcode.3mf"
+        with zipfile.ZipFile(out, "w") as z:
+            z.writestr("Metadata/plate_1.gcode", b"G28\n")
+        repack_3mf(out)
+        with zipfile.ZipFile(out) as z:
+            # Should not crash; model_settings simply not added
+            assert "Metadata/plate_1.gcode" in z.namelist()
+
+    def test_repack_generates_missing_plate_json(self, tmp_path: Path) -> None:
+        """Lines 436-448, 518-519: repack generates plate_1.json when missing."""
+        from bambox.pack import repack_3mf
+
+        out = self._make_3mf(tmp_path)
+        repack_3mf(out)
+        with zipfile.ZipFile(out) as z:
+            plate_data = json.loads(z.read("Metadata/plate_1.json"))
+            assert "filament_colors" in plate_data
+            assert plate_data["version"] == 2
+
+
+# ---------------------------------------------------------------------------
+# File output
+# ---------------------------------------------------------------------------
+
+
 class TestFileOutput:
     def test_write_to_path(self, tmp_path: Path) -> None:
         out = tmp_path / "test.gcode.3mf"
