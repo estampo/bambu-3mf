@@ -18,21 +18,34 @@ jobs:
       is_release: ${{ steps.check.outputs.is_release }}
       version: ${{ steps.check.outputs.version }}
     steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
       - name: Check if this is a release PR merge
         id: check
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           SHA="${{ github.sha }}"
-          echo "Checking commit $SHA for associated release PR..."
+          MSG=$(git log -1 --format=%s "$SHA")
+          echo "Commit message: $MSG"
 
-          BRANCHES=$(gh api "repos/${{ github.repository }}/commits/${SHA}/pulls" \
-            --jq '.[].head.ref')
-          echo "Associated PR branches: ${BRANCHES:-<none>}"
-
-          VERSION=$(echo "$BRANCHES" \
-            | grep -oP '^release/v\K\d+\.\d+\.\d+$' \
+          # Primary: parse branch name from merge commit message (instant, no API race)
+          VERSION=$(echo "$MSG" \
+            | grep -oP 'release/v\K\d+\.\d+\.\d+' \
             | head -1 || true)
+
+          # Fallback: query the commits/pulls API
+          if [[ -z "$VERSION" ]]; then
+            echo "Merge message did not match — falling back to API..."
+            BRANCHES=$(gh api "repos/${{ github.repository }}/commits/${SHA}/pulls" \
+              --jq '.[].head.ref')
+            echo "Associated PR branches: ${BRANCHES:-<none>}"
+            VERSION=$(echo "$BRANCHES" \
+              | grep -oP '^release/v\K\d+\.\d+\.\d+$' \
+              | head -1 || true)
+          fi
 
           if [[ -n "$VERSION" ]]; then
             if gh api "repos/${{ github.repository }}/git/refs/tags/v${VERSION}" >/dev/null 2>&1; then
