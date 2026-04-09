@@ -64,6 +64,11 @@ def _assign_filament_slots(
     unslotted: list[tuple[str, str]] = []
     for slot, ftype, color in parsed:
         if slot is not None:
+            if slot in explicit:
+                raise ValueError(
+                    f"Duplicate filament slot {slot}: "
+                    f"'{explicit[slot][0]}' and '{ftype}' both assigned to slot {slot}"
+                )
             explicit[slot] = (ftype, color)
         else:
             unslotted.append((ftype, color))

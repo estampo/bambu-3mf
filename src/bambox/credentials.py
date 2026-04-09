@@ -13,6 +13,32 @@ from pathlib import Path
 log = logging.getLogger(__name__)
 
 
+def _cache_dir() -> Path:
+    """Return a writable cache directory for temporary token files.
+
+    Resolution order:
+    1. ``XDG_CACHE_HOME/bambox`` (if set)
+    2. ``~/.cache/bambox`` (Unix) / ``AppData/Local/bambox/cache`` (Windows)
+    3. ``tempfile.gettempdir()/bambox`` (fallback when home is not writable)
+    """
+    xdg = os.environ.get("XDG_CACHE_HOME")
+    if xdg:
+        d = Path(xdg) / "bambox"
+    elif sys.platform == "win32":
+        d = Path.home() / "AppData" / "Local" / "bambox" / "cache"
+    else:
+        d = Path.home() / ".cache" / "bambox"
+
+    try:
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+    except OSError:
+        fallback = Path(tempfile.gettempdir()) / "bambox"
+        fallback.mkdir(parents=True, exist_ok=True)
+        log.warning("Cannot create cache dir %s — using %s", d, fallback)
+        return fallback
+
+
 def mask_serial(serial: str) -> str:
     """Mask a printer serial, keeping only the last 4 characters visible."""
     if len(serial) <= 4:
@@ -192,9 +218,7 @@ def cloud_token_json():
         "uid": cloud.get("uid", ""),
     }
 
-    # Use ~/.cache so Docker Desktop on macOS can mount the file
-    cache_dir = Path.home() / ".cache" / "bambox"
-    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_dir = _cache_dir()
     tmp = tempfile.NamedTemporaryFile(
         mode="w", suffix=".json", prefix="bambu_token_", dir=cache_dir, delete=False
     )

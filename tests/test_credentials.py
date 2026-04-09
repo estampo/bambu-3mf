@@ -9,6 +9,7 @@ import tomllib
 import pytest
 
 from bambox.credentials import (
+    _cache_dir,
     _credentials_path,
     _escape_toml_value,
     _load_raw,
@@ -22,6 +23,23 @@ from bambox.credentials import (
     save_cloud_credentials,
     save_printer,
 )
+
+
+class TestCacheDir:
+    def test_xdg_cache_home(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "xdg"))
+        d = _cache_dir()
+        assert d == tmp_path / "xdg" / "bambox"
+        assert d.exists()
+
+    def test_fallback_when_unwritable(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
+        monkeypatch.setattr("bambox.credentials.Path.home", lambda: tmp_path / "nope")
+        # Don't create the home dir — mkdir will fail
+        d = _cache_dir()
+        # Should fall back to tempdir
+        assert d.exists()
+        assert "bambox" in str(d)
 
 
 class TestMaskSerial:

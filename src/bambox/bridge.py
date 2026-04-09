@@ -77,8 +77,13 @@ def _write_token_json(cloud: dict[str, str], directory: Path | None = None) -> P
         "email": cloud.get("email", ""),
         "uid": cloud.get("uid", ""),
     }
-    d = directory or Path.home() / ".cache" / "bambox"
-    d.mkdir(parents=True, exist_ok=True)
+    if directory:
+        d = directory
+        d.mkdir(parents=True, exist_ok=True)
+    else:
+        from bambox.credentials import _cache_dir
+
+        d = _cache_dir()
     tmp = tempfile.NamedTemporaryFile(
         mode="w", suffix=".json", prefix="bambu_token_", dir=d, delete=False
     )
