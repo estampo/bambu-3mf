@@ -1,1 +1,1 @@
-Fix CuraEngine time prediction using max of ;TIME: and TIME_ELAPSED to include start gcode time.
+Add extract_slice_stats test coverage and clarify ;TIME: vs TIME_ELAPSED preference.

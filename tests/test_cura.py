@@ -441,17 +441,17 @@ class TestExtractSliceStats:
         stats = extract_slice_stats(gcode)
         assert stats.prediction == 500
 
-    def test_time_uses_max_of_time_and_elapsed(self) -> None:
-        """When ;TIME: is larger (includes start gcode time), use it."""
+    def test_time_prefers_elapsed_over_time_header(self) -> None:
+        """;TIME: is often a CuraEngine default (6666); prefer TIME_ELAPSED."""
         gcode = ";TIME:6666\n;LAYER:0\nG1 X0\n;TIME_ELAPSED:2799.0\n"
         stats = extract_slice_stats(gcode)
-        assert stats.prediction == 6666
+        assert stats.prediction == 2799
 
-    def test_time_uses_elapsed_when_larger(self) -> None:
-        """When TIME_ELAPSED is larger, use it (shouldn't normally happen)."""
-        gcode = ";TIME:100\n;LAYER:0\nG1 X0\n;TIME_ELAPSED:500.0\n"
+    def test_time_falls_back_to_time_header(self) -> None:
+        """When no TIME_ELAPSED is present, fall back to ;TIME:."""
+        gcode = ";TIME:1500\nG1 X0\n"
         stats = extract_slice_stats(gcode)
-        assert stats.prediction == 500
+        assert stats.prediction == 1500
 
     def test_no_time_info(self) -> None:
         gcode = "G28\nG1 X0\n"

@@ -300,26 +300,24 @@ def extract_slice_stats(gcode: str) -> SliceStats:
     """Extract print time and filament usage from CuraEngine G-code.
 
     CuraEngine emits:
-    * ``;TIME:N`` — total print time in seconds (includes start gcode time)
-    * ``;TIME_ELAPSED:N`` — cumulative elapsed time (last value = slicing moves only)
+    * ``;TIME:N`` — total print time in seconds (often default 6666)
+    * ``;TIME_ELAPSED:N`` — cumulative elapsed time (last value = total)
     * ``;Filament used: X.XXm, Y.YYm`` — per-extruder filament usage
 
-    We use ``max(;TIME:, last TIME_ELAPSED)`` because TIME_ELAPSED only
-    counts slicing moves while ;TIME: includes the full print cycle
-    (homing, bed leveling, nozzle wipe, etc.).
+    We prefer the last ``TIME_ELAPSED`` value (accurate per-layer
+    cumulative time) over ``;TIME:`` which CuraEngine often sets to a
+    default placeholder (6666).
     """
     stats = SliceStats()
 
-    # Time: use max of ;TIME: and last TIME_ELAPSED.
-    # ;TIME: includes full print cycle; TIME_ELAPSED only counts slicing moves.
-    time_total = 0
-    m_time = re.search(r";TIME:(\d+)", gcode)
-    if m_time:
-        time_total = int(m_time.group(1))
+    # Time: prefer last TIME_ELAPSED (accurate) over ;TIME: (often 6666 default)
     elapsed = re.findall(r";TIME_ELAPSED:([\d.]+)", gcode)
     if elapsed:
-        time_total = max(time_total, int(float(elapsed[-1])))
-    stats.prediction = time_total
+        stats.prediction = int(float(elapsed[-1]))
+    else:
+        m_time = re.search(r";TIME:(\d+)", gcode)
+        if m_time:
+            stats.prediction = int(m_time.group(1))
 
     # Filament: ";Filament used: 1.234m, 0.567m" (one entry per extruder)
     m_fil = re.search(r";Filament used:\s*(.+)", gcode)
