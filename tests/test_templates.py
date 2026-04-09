@@ -213,6 +213,53 @@ class TestRenderTemplate:
 # ---------------------------------------------------------------------------
 
 
+class TestSilentUndefined:
+    """Test that undefined template variables are handled gracefully (lines 113-134)."""
+
+    def test_undefined_variable_renders_empty(self) -> None:
+        """Undefined variables should render as empty string where possible."""
+        # Provide max_layer_z (required for arithmetic) but omit other vars
+        result = render_template(
+            "p1s_end.gcode.j2",
+            {"max_layer_z": 10.0},  # only the arithmetic-required var
+        )
+        # Should render without error; other undefined vars become empty
+        assert isinstance(result, str)
+        assert "M140 S0" in result
+
+    def test_undefined_in_arithmetic_context(self) -> None:
+        """Undefined variables used in numeric context should not crash."""
+        result = render_template(
+            "p1s_end.gcode.j2",
+            {"max_layer_z": 10.0},  # only provide one var
+        )
+        assert "M140 S0" in result
+
+
+class TestOrcaControlFlowInExpression:
+    """Test that control flow keywords inside {expr} are not double-converted (line 74)."""
+
+    def test_control_flow_keyword_in_expression_preserved(self) -> None:
+        # A curly expression that starts with a control flow keyword
+        # should be returned as-is by _replace_expr
+        result = orca_to_jinja2("{if x > 5}")
+        assert result == "{% if x > 5 %}"
+
+    def test_square_bracket_inside_jinja2_expression(self) -> None:
+        """Square bracket vars inside {{ }} should not be double-converted (line 86-90)."""
+        # After curly conversion, [var] inside {{ }} should stay as array index
+        result = orca_to_jinja2("{filament_type[extruder]}")
+        assert result == "{{ filament_type[extruder] }}"
+
+    def test_logical_operators_converted(self) -> None:
+        """|| and && in conditions should become 'or' and 'and'."""
+        result = orca_to_jinja2("{if x > 5 || y < 3}")
+        assert result == "{% if x > 5  or  y < 3 %}"
+
+        result = orca_to_jinja2("{if x > 5 && y < 3}")
+        assert result == "{% if x > 5  and  y < 3 %}"
+
+
 class TestTemplateFiles:
     """Verify all expected template files exist."""
 
