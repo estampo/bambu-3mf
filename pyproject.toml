@@ -34,9 +34,6 @@ dev = [
     "towncrier>=24.7.0",
     "requests>=2.28.0",
 ]
-e2e = [
-    "estampo>=0.3.0",
-]
 docs = [
     "pdoc>=14.0.0",
 ]
