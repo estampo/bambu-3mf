@@ -22,6 +22,15 @@ from pathlib import Path
 
 log = logging.getLogger(__name__)
 
+
+def _xml_ns(root: ET.Element) -> str:
+    """Return the default namespace prefix (e.g. '{http://...}') or empty string."""
+    tag = root.tag
+    if tag.startswith("{"):
+        return tag[: tag.index("}") + 1]
+    return ""
+
+
 DOCKER_IMAGE = "estampo/cloud-bridge:bambu-02.05.00.00"
 
 # ---------------------------------------------------------------------------
@@ -291,9 +300,10 @@ def _build_ams_mapping(
             filament_by_id: dict[int, ET.Element] = {}
             if "Metadata/slice_info.config" in z.namelist():
                 root = ET.fromstring(z.read("Metadata/slice_info.config"))
-                plate_el = root.find("plate")
+                ns = _xml_ns(root)
+                plate_el = root.find(f"{ns}plate")
                 if plate_el is not None:
-                    for f in plate_el.findall("filament"):
+                    for f in plate_el.findall(f"{ns}filament"):
                         fid = int(f.get("id", "1"))
                         filament_by_id[fid] = f
                     if not total_slots and filament_by_id:
@@ -382,12 +392,13 @@ def _patch_config_3mf_colors(
         return config_bytes
 
     root = ET.fromstring(file_data["Metadata/slice_info.config"])
-    plate_el = root.find("plate")
+    ns = _xml_ns(root)
+    plate_el = root.find(f"{ns}plate")
     if plate_el is None:
         return config_bytes
 
     changed = False
-    for f in plate_el.findall("filament"):
+    for f in plate_el.findall(f"{ns}filament"):
         fid = int(f.get("id", "1"))
         idx = fid - 1
         if idx < len(mapping):
