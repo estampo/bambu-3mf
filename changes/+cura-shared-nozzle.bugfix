@@ -1,0 +1,1 @@
+Add extruders_share_nozzle and extruders_share_heater to CuraEngine P1S definition so tool changes generate proper purge volumes for single-nozzle AMS.
