@@ -1,1 +1,1 @@
-AMS mapping no longer silently maps unmatched filaments to arbitrary physical trays.
+AMS mapping raises an error when filaments have no matching tray instead of silently using external spool.

@@ -332,13 +332,11 @@ def _build_ams_mapping(
             mapping[idx] = best["phys_slot"]
             used.add(best["phys_slot"])
         else:
-            log.warning(
-                "No AMS tray match for filament slot %d (type=%s, color=%s)",
-                filament_id,
-                fil_type,
-                color,
+            raise RuntimeError(
+                f"Filament slot {filament_id} (type={fil_type}, color={color}) "
+                f"has no matching AMS tray. Load the correct filament or use "
+                f"--skip-ams-mapping to print without AMS."
             )
-            # Leave as -1 (unresolved) — do NOT guess a physical tray
 
     mapping2 = []
     for slot in mapping:

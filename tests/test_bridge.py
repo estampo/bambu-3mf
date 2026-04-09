@@ -7,6 +7,8 @@ import subprocess
 import zipfile
 from unittest.mock import patch
 
+import pytest
+
 from bambox.bridge import _build_ams_mapping, _find_local_bridge, _run_bridge_local
 
 
@@ -101,8 +103,8 @@ def _make_test_3mf(path, filaments, project_settings=None):
 
 
 class TestBuildAmsMapping:
-    def test_unmatched_filament_stays_unresolved(self, tmp_path):
-        """Filaments with no matching AMS tray must get -1, not identity-mapped."""
+    def test_unmatched_filament_raises_error(self, tmp_path):
+        """Filaments with no matching AMS tray must raise, not silently fallback."""
         threemf = tmp_path / "test.3mf"
         # Filament slot 1: PLA, red — no matching tray in AMS
         _make_test_3mf(threemf, [(1, "PLA", "FF0000")])
@@ -119,10 +121,8 @@ class TestBuildAmsMapping:
             },
         ]
 
-        result = _build_ams_mapping(threemf, ams_trays)
-        # Slot must be -1 (unresolved), not 0 (identity-mapped)
-        assert result["amsMapping"] == [-1]
-        assert result["amsMapping2"] == [{"ams_id": 255, "slot_id": 255}]
+        with pytest.raises(RuntimeError, match="Filament slot 1.*no matching AMS tray"):
+            _build_ams_mapping(threemf, ams_trays)
 
     def test_matched_filament_maps_correctly(self, tmp_path):
         """Filaments with a matching AMS tray get the correct physical slot."""
@@ -144,8 +144,8 @@ class TestBuildAmsMapping:
         assert result["amsMapping"] == [2]
         assert result["amsMapping2"] == [{"ams_id": 0, "slot_id": 2}]
 
-    def test_mixed_matched_and_unmatched(self, tmp_path):
-        """Only matched filaments get mapped; unmatched stay -1."""
+    def test_mixed_matched_and_unmatched_raises(self, tmp_path):
+        """Partial mismatch must raise on the unmatched filament."""
         threemf = tmp_path / "test.3mf"
         _make_test_3mf(
             threemf,
@@ -153,7 +153,7 @@ class TestBuildAmsMapping:
             project_settings={"filament_colour": ["#FF0000FF", "#0000FFFF"]},
         )
 
-        # Only PLA/red available in AMS
+        # Only PLA/red available in AMS — ABS/blue has no match
         ams_trays = [
             {
                 "phys_slot": 1,
@@ -165,7 +165,5 @@ class TestBuildAmsMapping:
             },
         ]
 
-        result = _build_ams_mapping(threemf, ams_trays)
-        assert result["amsMapping"] == [1, -1]
-        assert result["amsMapping2"][0] == {"ams_id": 0, "slot_id": 1}
-        assert result["amsMapping2"][1] == {"ams_id": 255, "slot_id": 255}
+        with pytest.raises(RuntimeError, match="Filament slot 2.*no matching AMS tray"):
+            _build_ams_mapping(threemf, ams_trays)
