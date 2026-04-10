@@ -6,6 +6,7 @@ import argparse
 import json
 import logging
 import sys
+from importlib.metadata import version
 from pathlib import Path
 
 from bambox.cura import (
@@ -714,6 +715,9 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         prog="bambox",
         description="Package and print G-code on Bambu Lab printers",
+    )
+    parser.add_argument(
+        "-V", "--version", action="version", version=f"%(prog)s {version('bambox')}"
     )
     parser.add_argument("-v", "--verbose", action="store_true", help="Enable debug logging")
     sub = parser.add_subparsers(dest="command")
