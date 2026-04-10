@@ -244,3 +244,23 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           skip-existing: true
+
+  # ── Trigger bridge binary build ─────────────────────────────────────
+  # Tags created by GITHUB_TOKEN don't trigger other workflows, so we
+  # explicitly dispatch the bridge build to attach native binaries to
+  # the release.
+  build-bridge:
+    needs: [version, create-tag]
+    if: |
+      always() &&
+      needs.version.result == 'success' &&
+      needs.create-tag.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger bridge build
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
+        run: |
+          gh workflow run build-bridge.yml \
+            --repo "${{ github.repository }}" \
+            --ref "v${{ needs.version.outputs.version }}"
