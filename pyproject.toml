@@ -12,6 +12,10 @@ description = "Package plain G-code into Bambu Lab .gcode.3mf files"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"
+dependencies = [
+    "typer>=0.12",
+    "rich>=13.0",
+]
 authors = [{ name = "estampo contributors" }]
 classifiers = [
     "Development Status :: 3 - Alpha",

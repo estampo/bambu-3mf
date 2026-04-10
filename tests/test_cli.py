@@ -605,12 +605,13 @@ class TestMainDispatch:
             main(["-v", "pack", str(gcode)])
             mock_log.assert_called_once()
 
-    def test_no_command_shows_help(self) -> None:
-        with pytest.raises(SystemExit, match="1"):
+    def test_no_command_shows_help(self, capsys: pytest.CaptureFixture[str]) -> None:
+        with pytest.raises(SystemExit, match="2"):
             main([])
+        out = capsys.readouterr().out
+        assert "Usage" in out
 
     def test_no_command_with_flag_only(self) -> None:
-        # argparse exits with code 2 for unrecognized args
         with pytest.raises(SystemExit, match="2"):
             main(["--nonexistent-flag"])
 
@@ -659,30 +660,29 @@ class TestFormatStatus:
     def test_running_with_color(self) -> None:
         status = {"gcode_state": "RUNNING", "nozzle_temper": 220, "bed_temper": 60}
         text = _format_status(status, use_color=True)
-        assert "\033[32m" in text  # green
-        assert "\033[0m" in text  # reset
+        assert "[green]" in text
         assert "RUNNING" in text
 
     def test_failed_color(self) -> None:
         status = {"gcode_state": "FAILED", "nozzle_temper": 0, "bed_temper": 0}
         text = _format_status(status, use_color=True)
-        assert "\033[31m" in text  # red
+        assert "[red bold]" in text
 
     def test_pause_color(self) -> None:
         status = {"gcode_state": "PAUSE", "nozzle_temper": 0, "bed_temper": 0}
         text = _format_status(status, use_color=True)
-        assert "\033[33m" in text  # yellow
+        assert "[yellow]" in text
 
     def test_finish_color(self) -> None:
         status = {"gcode_state": "FINISH", "nozzle_temper": 0, "bed_temper": 0}
         text = _format_status(status, use_color=True)
-        assert "\033[34m" in text  # blue
+        assert "[blue]" in text
 
     def test_unknown_state_no_color_escape(self) -> None:
         status = {"gcode_state": "WEIRD", "nozzle_temper": 0, "bed_temper": 0}
         text = _format_status(status, use_color=True)
-        assert "\033[" not in text
-        assert "WEIRD" in text
+        # Unknown state should not have ANSI escapes or Rich markup style tags
+        assert "State: WEIRD" in text
 
     def test_progress_bar_rendered(self) -> None:
         status = {
