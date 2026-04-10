@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import subprocess
 import xml.etree.ElementTree as ET
 import zipfile
@@ -334,12 +335,9 @@ class TestLoadCredentials:
             load_credentials(cred)
 
     def test_default_path_when_none(self, tmp_path):
-        """When path is None, it looks under ~/.config/estampo/."""
-        with patch("bambox.bridge.Path.home", return_value=tmp_path):
-            cfg = tmp_path / ".config" / "estampo"
-            cfg.mkdir(parents=True)
-            cred = cfg / "credentials.toml"
-            cred.write_text('[cloud]\ntoken = "t"\n')
+        """When path is None, delegates to load_cloud_credentials()."""
+        cloud = {"token": "t", "email": "a@b"}
+        with patch("bambox.credentials.load_cloud_credentials", return_value=cloud):
             result = load_credentials(None)
             assert result["token"] == "t"
 
@@ -373,6 +371,7 @@ class TestWriteTokenJson:
         finally:
             path.unlink()
 
+    @pytest.mark.skipif(not hasattr(os, "getuid"), reason="chmod 0o600 not enforced on Windows")
     def test_file_permissions(self, tmp_path):
         cloud = {"token": "tok"}
         path = _write_token_json(cloud, directory=tmp_path)
