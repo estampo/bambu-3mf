@@ -264,7 +264,7 @@ def _cmd_repack(args: argparse.Namespace) -> None:
 
 def _cmd_validate(args: argparse.Namespace) -> None:
     """Validate a .gcode.3mf archive."""
-    from bambox.validate import Severity, validate_3mf
+    from bambox.validate import Severity, compare_3mf, validate_3mf
 
     if not args.threemf.exists():
         print(f"Error: {args.threemf} not found", file=sys.stderr)
@@ -272,8 +272,19 @@ def _cmd_validate(args: argparse.Namespace) -> None:
 
     result = validate_3mf(args.threemf)
 
+    # Run reference comparison if requested
+    ref_result = None
+    if args.reference:
+        if not args.reference.exists():
+            print(f"Error: reference {args.reference} not found", file=sys.stderr)
+            sys.exit(1)
+        ref_result = compare_3mf(args.threemf, args.reference)
+
     if args.json_output:
-        print(json.dumps(result.to_dict(), indent=2))
+        output = result.to_dict()
+        if ref_result is not None:
+            output["comparison"] = ref_result.to_dict()
+        print(json.dumps(output, indent=2))
     else:
         name = args.threemf.name
         for f in result.findings:
@@ -286,19 +297,34 @@ def _cmd_validate(args: argparse.Namespace) -> None:
                 line += f" [{f.detail}]"
             print(line)
 
+        if ref_result is not None:
+            for f in ref_result.findings:
+                if f.severity == Severity.ERROR:
+                    prefix = f"  COMP  {f.code}"
+                else:
+                    prefix = f"  COMP  {f.code}"
+                line = f"{prefix}: {f.message}"
+                if f.detail:
+                    line += f" [{f.detail}]"
+                print(line)
+
         n_err = len(result.errors)
         n_warn = len(result.warnings)
-        if n_err == 0 and n_warn == 0:
+        n_comp = len(ref_result.errors) if ref_result else 0
+        total_err = n_err + n_comp
+
+        if total_err == 0 and n_warn == 0:
             print(f"{name}: valid")
-        elif n_err == 0:
+        elif total_err == 0:
             print(f"{name}: valid ({n_warn} warning{'s' if n_warn != 1 else ''})")
         else:
             print(
-                f"{name}: INVALID ({n_err} error{'s' if n_err != 1 else ''}, "
+                f"{name}: INVALID ({total_err} error{'s' if total_err != 1 else ''}, "
                 f"{n_warn} warning{'s' if n_warn != 1 else ''})"
             )
 
-    if not result.valid:
+    has_errors = not result.valid or (ref_result is not None and not ref_result.valid)
+    if has_errors:
         sys.exit(1)
     if args.strict and result.warnings:
         sys.exit(1)
@@ -803,6 +829,12 @@ def main(argv: list[str] | None = None) -> None:
         "--strict",
         action="store_true",
         help="Treat warnings as errors (non-zero exit)",
+    )
+    validate_p.add_argument(
+        "--reference",
+        type=Path,
+        default=None,
+        help="Reference .gcode.3mf to compare against",
     )
 
     # --- status subcommand ---

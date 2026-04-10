@@ -70,6 +70,9 @@ _RE_M991 = re.compile(r"^M991 S0 P(\d+)", re.MULTILINE)
 _RE_M73_P = re.compile(r"^M73 P\d+", re.MULTILINE)
 _RE_M73_R = re.compile(r"^M73 P\d+ R\d+", re.MULTILINE)
 _RE_M73_R_VALUE = re.compile(r"^M73 P\d+ R(\d+)", re.MULTILINE)
+_RE_M620_S = re.compile(r"^M620 S(\d+)", re.MULTILINE)
+_RE_M621_S = re.compile(r"^M621 S(\d+)", re.MULTILINE)
+_RE_BARE_TOOL = re.compile(r"^T([0-4])\s*$", re.MULTILINE)
 
 
 # ---------------------------------------------------------------------------
@@ -239,6 +242,7 @@ def _check_gcode(gcode: str, findings: list[Finding]) -> None:
     _check_unsubstituted_templates(gcode, findings)
     _check_header_block(gcode, findings)
     _check_layer_markers(gcode, findings)
+    _check_multi_filament(gcode, findings)
 
 
 def _check_temperature_commands(gcode: str, findings: list[Finding]) -> None:
@@ -420,6 +424,54 @@ def _check_layer_markers(gcode: str, findings: list[Finding]) -> None:
                 break
 
 
+def _check_multi_filament(gcode: str, findings: list[Finding]) -> None:
+    """E013/E014: Multi-filament tool change checks."""
+    # Detect multi-filament: count unique M620 S(digit) values where digit < 255
+    m620_slots = _RE_M620_S.findall(gcode)
+    unique_slots = {int(s) for s in m620_slots if int(s) < 255}
+    is_multi = len(unique_slots) >= 2
+
+    if not is_multi:
+        return
+
+    # E013: multi-filament gcode should have M620/M621 sequences
+    has_m620 = bool(m620_slots)
+    has_m621 = bool(_RE_M621_S.search(gcode))
+    if not has_m620 or not has_m621:
+        findings.append(
+            Finding(
+                Severity.ERROR,
+                "E013",
+                "Multi-filament print missing M620/M621 tool change sequences",
+                f"Found {len(unique_slots)} tool slots but no M620/M621 pairs",
+            )
+        )
+
+    # E014: bare T commands outside M620/M621 blocks
+    # Walk lines tracking whether we are inside an M620/M621 block
+    in_block = False
+    for line in gcode.splitlines():
+        stripped = line.strip()
+        if stripped.startswith(";"):
+            continue
+        if _RE_M620_S.match(stripped):
+            in_block = True
+            continue
+        if _RE_M621_S.match(stripped):
+            in_block = False
+            continue
+        if not in_block and _RE_BARE_TOOL.match(stripped):
+            findings.append(
+                Finding(
+                    Severity.ERROR,
+                    "E014",
+                    "Bare tool command outside M620/M621 block in multi-filament print",
+                    stripped[:120],
+                )
+            )
+            return  # one finding is enough
+
+
 # ---------------------------------------------------------------------------
 # Metadata checks (slice_info.config)
 # ---------------------------------------------------------------------------
@@ -537,6 +589,61 @@ def _check_project_settings(raw: str, findings: list[Finding]) -> None:
             Finding(Severity.WARNING, "W006", "printer_model is empty in project_settings")
         )
 
+    # W012: nozzle temperature range (150-350°C)
+    nozzle_temps = settings.get("nozzle_temperature")
+    if isinstance(nozzle_temps, list):
+        for i, v in enumerate(nozzle_temps):
+            try:
+                temp = int(v) if isinstance(v, str) else int(v)
+            except (ValueError, TypeError):
+                continue
+            if temp != 0 and (temp < 150 or temp > 350):
+                findings.append(
+                    Finding(
+                        Severity.WARNING,
+                        "W012",
+                        f"Nozzle temperature out of range: {temp}°C (slot {i})",
+                        "expected 150-350°C",
+                    )
+                )
+                break  # one finding is enough
+
+    # W013: bed temperature range (0-120°C)
+    _bed_temp_keys = [k for k in settings if k.endswith("_temp") or k == "hot_plate_temp"]
+    for key in _bed_temp_keys:
+        val = settings[key]
+        values = val if isinstance(val, list) else [val]
+        for i, v in enumerate(values):
+            try:
+                temp = int(v) if isinstance(v, str) else int(v)
+            except (ValueError, TypeError):
+                continue
+            if temp < 0 or temp > 120:
+                findings.append(
+                    Finding(
+                        Severity.WARNING,
+                        "W013",
+                        f"Bed temperature out of range: {temp}°C (key={key}, slot {i})",
+                        "expected 0-120°C",
+                    )
+                )
+                break  # one finding per key is enough
+
+    # W014: flush_volumes_matrix must be a perfect square
+    fvm = settings.get("flush_volumes_matrix")
+    if isinstance(fvm, list) and len(fvm) > 0:
+        import math
+
+        n = int(math.isqrt(len(fvm)))
+        if n * n != len(fvm):
+            findings.append(
+                Finding(
+                    Severity.WARNING,
+                    "W014",
+                    f"flush_volumes_matrix length {len(fvm)} is not a perfect square",
+                )
+            )
+
 
 # ---------------------------------------------------------------------------
 # Time sync checks
@@ -582,3 +689,136 @@ def _check_time_sync(gcode: str, slice_info_xml: str, findings: list[Finding]) -
                     f"ratio={ratio:.2f}, expected 0.5–2.0",
                 )
             )
+
+
+# ---------------------------------------------------------------------------
+# Reference comparison
+# ---------------------------------------------------------------------------
+
+
+def _extract_3mf_metadata(path: Path) -> dict[str, object]:
+    """Extract comparison-relevant metadata from a .gcode.3mf archive."""
+    meta: dict[str, object] = {}
+    try:
+        with zipfile.ZipFile(path, "r") as zf:
+            # slice_info
+            si_raw = _safe_read_str(zf, "Metadata/slice_info.config")
+            if si_raw:
+                try:
+                    root = ET.fromstring(si_raw)
+                    plate = root.find("plate")
+                    if plate is not None:
+                        si_meta = {
+                            el.get("key", ""): el.get("value", "")
+                            for el in plate.findall("metadata")
+                        }
+                        meta["printer_model_id"] = si_meta.get("printer_model_id", "")
+                        try:
+                            meta["prediction"] = int(si_meta.get("prediction", "0"))
+                        except ValueError:
+                            meta["prediction"] = 0
+                        try:
+                            meta["weight"] = float(si_meta.get("weight", "0"))
+                        except ValueError:
+                            meta["weight"] = 0.0
+                        # Filament types
+                        filaments = plate.findall("filament")
+                        meta["filament_types"] = [f.get("type", "") for f in filaments]
+                except ET.ParseError:
+                    pass
+
+            # Count M620 tool changes in gcode
+            gcode_bytes = _safe_read(zf, "Metadata/plate_1.gcode")
+            if gcode_bytes is not None:
+                gcode = gcode_bytes.decode(errors="replace")
+                meta["tool_changes"] = len(_RE_M620_S.findall(gcode))
+            else:
+                meta["tool_changes"] = 0
+    except zipfile.BadZipFile:
+        pass
+    return meta
+
+
+def compare_3mf(test_path: Path, reference_path: Path) -> ValidationResult:
+    """Compare a test archive against a reference archive.
+
+    Returns findings with codes C001-C005 for comparison failures.
+    """
+    findings: list[Finding] = []
+    test_meta = _extract_3mf_metadata(test_path)
+    ref_meta = _extract_3mf_metadata(reference_path)
+
+    if not test_meta or not ref_meta:
+        findings.append(
+            Finding(Severity.ERROR, "C001", "Could not extract metadata for comparison")
+        )
+        return ValidationResult(findings)
+
+    # C001: filament types must match
+    test_fil = test_meta.get("filament_types", [])
+    ref_fil = ref_meta.get("filament_types", [])
+    if test_fil != ref_fil:
+        findings.append(
+            Finding(
+                Severity.ERROR,
+                "C001",
+                "Filament types differ from reference",
+                f"test={test_fil}, reference={ref_fil}",
+            )
+        )
+
+    # C002: print time within ±50%
+    test_pred = int(str(test_meta.get("prediction", 0)) or "0")
+    ref_pred = int(str(ref_meta.get("prediction", 0)) or "0")
+    if ref_pred > 0 and test_pred > 0:
+        ratio = test_pred / ref_pred
+        if ratio < 0.5 or ratio > 1.5:
+            findings.append(
+                Finding(
+                    Severity.ERROR,
+                    "C002",
+                    f"Print time diverges from reference: {test_pred}s vs {ref_pred}s",
+                    f"ratio={ratio:.2f}, expected 0.5–1.5",
+                )
+            )
+
+    # C003: weight within ±30%
+    test_weight = float(str(test_meta.get("weight", 0)) or "0")
+    ref_weight = float(str(ref_meta.get("weight", 0)) or "0")
+    if ref_weight > 0 and test_weight > 0:
+        ratio = test_weight / ref_weight
+        if ratio < 0.7 or ratio > 1.3:
+            findings.append(
+                Finding(
+                    Severity.ERROR,
+                    "C003",
+                    f"Weight diverges from reference: {test_weight:.1f}g vs {ref_weight:.1f}g",
+                    f"ratio={ratio:.2f}, expected 0.7–1.3",
+                )
+            )
+
+    # C004: same tool change count
+    test_tc = int(str(test_meta.get("tool_changes", 0)) or "0")
+    ref_tc = int(str(ref_meta.get("tool_changes", 0)) or "0")
+    if test_tc != ref_tc:
+        findings.append(
+            Finding(
+                Severity.ERROR,
+                "C004",
+                f"Tool change count differs: {test_tc} vs reference {ref_tc}",
+            )
+        )
+
+    # C005: matching printer_model_id
+    test_pm = str(test_meta.get("printer_model_id", ""))
+    ref_pm = str(ref_meta.get("printer_model_id", ""))
+    if test_pm and ref_pm and test_pm != ref_pm:
+        findings.append(
+            Finding(
+                Severity.ERROR,
+                "C005",
+                f"printer_model_id differs: '{test_pm}' vs reference '{ref_pm}'",
+            )
+        )
+
+    return ValidationResult(findings)

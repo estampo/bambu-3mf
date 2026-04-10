@@ -12,6 +12,7 @@ import pytest
 from bambox.validate import (
     Severity,
     ValidationResult,
+    compare_3mf,
     validate_3mf,
     validate_3mf_buffer,
 )
@@ -675,3 +676,285 @@ class TestTimeSync:
         path = _build_valid_3mf(tmp_path)
         result = validate_3mf(path)
         assert not any(f.code == "W011" for f in result.findings)
+
+
+# ---------------------------------------------------------------------------
+# E013: M620/M621 multi-filament check
+# ---------------------------------------------------------------------------
+
+
+_MULTI_FILAMENT_GCODE = """\
+; HEADER_BLOCK_START
+; total layer number: 2
+; HEADER_BLOCK_END
+M73 P0 R5
+M620 S0
+T0
+M621 S0
+;LAYER_CHANGE
+;Z:0.2
+;HEIGHT:0.2
+M73 L1
+M991 S0 P1
+M73 P50 R3
+G1 X10 Y10 E1 F600
+M620 S1
+T1
+M621 S1
+;LAYER_CHANGE
+;Z:0.4
+;HEIGHT:0.2
+M73 L2
+M991 S0 P2
+M73 P100 R0
+G1 X20 Y20 E2 F600
+"""
+
+
+class TestMultiFilamentE013:
+    def test_proper_multi_filament_passes(self, tmp_path: Path) -> None:
+        path = _build_valid_3mf(tmp_path, gcode=_MULTI_FILAMENT_GCODE)
+        result = validate_3mf(path)
+        assert not any(f.code == "E013" for f in result.findings)
+
+    def test_single_filament_no_check(self, tmp_path: Path) -> None:
+        """Single-filament gcode should not trigger E013."""
+        path = _build_valid_3mf(tmp_path)
+        result = validate_3mf(path)
+        assert not any(f.code == "E013" for f in result.findings)
+
+
+# ---------------------------------------------------------------------------
+# E014: Bare T commands
+# ---------------------------------------------------------------------------
+
+
+class TestBareToolCommands:
+    def test_bare_t_outside_block(self, tmp_path: Path) -> None:
+        """Bare T1 outside M620/M621 block in multi-filament print."""
+        gcode = """\
+; HEADER_BLOCK_START
+; total layer number: 2
+; HEADER_BLOCK_END
+M73 P0 R5
+M620 S0
+T0
+M621 S0
+;LAYER_CHANGE
+;Z:0.2
+;HEIGHT:0.2
+M73 L1
+M991 S0 P1
+M73 P50 R3
+G1 X10 Y10 E1 F600
+T1
+M620 S1
+T1
+M621 S1
+;LAYER_CHANGE
+;Z:0.4
+;HEIGHT:0.2
+M73 L2
+M991 S0 P2
+M73 P100 R0
+G1 X20 Y20 E2 F600
+"""
+        path = _build_valid_3mf(tmp_path, gcode=gcode)
+        result = validate_3mf(path)
+        assert any(f.code == "E014" for f in result.errors)
+
+    def test_t_inside_block_ok(self, tmp_path: Path) -> None:
+        """T commands inside M620/M621 blocks should not trigger E014."""
+        path = _build_valid_3mf(tmp_path, gcode=_MULTI_FILAMENT_GCODE)
+        result = validate_3mf(path)
+        assert not any(f.code == "E014" for f in result.findings)
+
+
+# ---------------------------------------------------------------------------
+# W012: Nozzle temperature range
+# ---------------------------------------------------------------------------
+
+
+class TestNozzleTempRange:
+    def test_out_of_range_nozzle_temp(self, tmp_path: Path) -> None:
+        settings = json.dumps(
+            {
+                "filament_type": ["PLA"] * 5,
+                "filament_colour": ["#F2754E"] * 5,
+                "nozzle_temperature": ["400", "220", "220", "220", "220"],
+                "nozzle_temperature_initial_layer": ["220"] * 5,
+                "bed_temperature": ["60"] * 5,
+                "filament_max_volumetric_speed": ["12"] * 5,
+            }
+        )
+        path = _build_valid_3mf(tmp_path, settings=settings)
+        result = validate_3mf(path)
+        assert any(f.code == "W012" for f in result.warnings)
+
+    def test_valid_nozzle_temp_passes(self, tmp_path: Path) -> None:
+        path = _build_valid_3mf(tmp_path)
+        result = validate_3mf(path)
+        assert not any(f.code == "W012" for f in result.findings)
+
+
+# ---------------------------------------------------------------------------
+# W013: Bed temperature range
+# ---------------------------------------------------------------------------
+
+
+class TestBedTempRange:
+    def test_out_of_range_bed_temp(self, tmp_path: Path) -> None:
+        settings = json.dumps(
+            {
+                "filament_type": ["PLA"] * 5,
+                "filament_colour": ["#F2754E"] * 5,
+                "nozzle_temperature": ["220"] * 5,
+                "nozzle_temperature_initial_layer": ["220"] * 5,
+                "bed_temperature": ["60"] * 5,
+                "filament_max_volumetric_speed": ["12"] * 5,
+                "hot_plate_temp": ["150", "60", "60", "60", "60"],
+            }
+        )
+        path = _build_valid_3mf(tmp_path, settings=settings)
+        result = validate_3mf(path)
+        assert any(f.code == "W013" for f in result.warnings)
+
+    def test_valid_bed_temp_passes(self, tmp_path: Path) -> None:
+        path = _build_valid_3mf(tmp_path)
+        result = validate_3mf(path)
+        assert not any(f.code == "W013" for f in result.findings)
+
+
+# ---------------------------------------------------------------------------
+# W014: flush_volumes_matrix
+# ---------------------------------------------------------------------------
+
+
+class TestFlushVolumesMatrix:
+    def test_non_square_matrix(self, tmp_path: Path) -> None:
+        settings = json.dumps(
+            {
+                "filament_type": ["PLA"] * 5,
+                "filament_colour": ["#F2754E"] * 5,
+                "nozzle_temperature": ["220"] * 5,
+                "nozzle_temperature_initial_layer": ["220"] * 5,
+                "bed_temperature": ["60"] * 5,
+                "filament_max_volumetric_speed": ["12"] * 5,
+                "flush_volumes_matrix": [0, 1, 2],
+            }
+        )
+        path = _build_valid_3mf(tmp_path, settings=settings)
+        result = validate_3mf(path)
+        assert any(f.code == "W014" for f in result.warnings)
+
+    def test_square_matrix_passes(self, tmp_path: Path) -> None:
+        settings = json.dumps(
+            {
+                "filament_type": ["PLA"] * 5,
+                "filament_colour": ["#F2754E"] * 5,
+                "nozzle_temperature": ["220"] * 5,
+                "nozzle_temperature_initial_layer": ["220"] * 5,
+                "bed_temperature": ["60"] * 5,
+                "filament_max_volumetric_speed": ["12"] * 5,
+                "flush_volumes_matrix": [0, 1, 2, 3],
+            }
+        )
+        path = _build_valid_3mf(tmp_path, settings=settings)
+        result = validate_3mf(path)
+        assert not any(f.code == "W014" for f in result.findings)
+
+
+# ---------------------------------------------------------------------------
+# compare_3mf — reference comparison
+# ---------------------------------------------------------------------------
+
+
+class TestCompare3mf:
+    def test_identical_archives(self, tmp_path: Path) -> None:
+        (tmp_path / "a").mkdir()
+        a = _build_valid_3mf(tmp_path / "a")
+        (tmp_path / "b").mkdir()
+        b = _build_valid_3mf(tmp_path / "b")
+        result = compare_3mf(a, b)
+        assert result.valid
+
+    def test_different_filament_types(self, tmp_path: Path) -> None:
+        (tmp_path / "a").mkdir()
+        (tmp_path / "b").mkdir()
+        a = _build_valid_3mf(tmp_path / "a")
+        si_petg = _MINIMAL_SLICE_INFO.replace('type="PLA"', 'type="PETG"')
+        b = _build_valid_3mf(tmp_path / "b", slice_info=si_petg)
+        result = compare_3mf(a, b)
+        assert any(f.code == "C001" for f in result.errors)
+
+    def test_divergent_print_time(self, tmp_path: Path) -> None:
+        (tmp_path / "a").mkdir()
+        (tmp_path / "b").mkdir()
+        a = _build_valid_3mf(tmp_path / "a")
+        si_long = _MINIMAL_SLICE_INFO.replace('value="150"', 'value="15000"')
+        b = _build_valid_3mf(tmp_path / "b", slice_info=si_long)
+        result = compare_3mf(a, b)
+        assert any(f.code == "C002" for f in result.errors)
+
+    def test_divergent_weight(self, tmp_path: Path) -> None:
+        (tmp_path / "a").mkdir()
+        (tmp_path / "b").mkdir()
+        a = _build_valid_3mf(tmp_path / "a")
+        si_heavy = _MINIMAL_SLICE_INFO.replace('value="5.00"', 'value="50.00"')
+        b = _build_valid_3mf(tmp_path / "b", slice_info=si_heavy)
+        result = compare_3mf(a, b)
+        assert any(f.code == "C003" for f in result.errors)
+
+    def test_different_printer_model(self, tmp_path: Path) -> None:
+        (tmp_path / "a").mkdir()
+        (tmp_path / "b").mkdir()
+        a = _build_valid_3mf(tmp_path / "a")
+        si_x1 = _MINIMAL_SLICE_INFO.replace('value="C12"', 'value="C11"')
+        b = _build_valid_3mf(tmp_path / "b", slice_info=si_x1)
+        result = compare_3mf(a, b)
+        assert any(f.code == "C005" for f in result.errors)
+
+    def test_different_tool_changes(self, tmp_path: Path) -> None:
+        (tmp_path / "a").mkdir()
+        (tmp_path / "b").mkdir()
+        a = _build_valid_3mf(tmp_path / "a", gcode=_MULTI_FILAMENT_GCODE)
+        b = _build_valid_3mf(tmp_path / "b")
+        result = compare_3mf(a, b)
+        assert any(f.code == "C004" for f in result.errors)
+
+
+# ---------------------------------------------------------------------------
+# CLI --reference
+# ---------------------------------------------------------------------------
+
+
+class TestCLIReference:
+    def test_reference_comparison(self, tmp_path: Path) -> None:
+        from bambox.cli import main
+
+        (tmp_path / "a").mkdir()
+        (tmp_path / "b").mkdir()
+        a = _build_valid_3mf(tmp_path / "a")
+        b = _build_valid_3mf(tmp_path / "b")
+        # Should not raise
+        main(["validate", str(a), "--reference", str(b)])
+
+    def test_reference_json(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+        from bambox.cli import main
+
+        (tmp_path / "a").mkdir()
+        (tmp_path / "b").mkdir()
+        a = _build_valid_3mf(tmp_path / "a")
+        b = _build_valid_3mf(tmp_path / "b")
+        main(["validate", "--json", str(a), "--reference", str(b)])
+        out = capsys.readouterr().out
+        data = json.loads(out)
+        assert "comparison" in data
+        assert data["comparison"]["valid"] is True
+
+    def test_reference_missing_file(self, tmp_path: Path) -> None:
+        from bambox.cli import main
+
+        a = _build_valid_3mf(tmp_path)
+        with pytest.raises(SystemExit, match="1"):
+            main(["validate", str(a), "--reference", str(tmp_path / "nope.3mf")])
