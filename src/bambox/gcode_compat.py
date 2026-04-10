@@ -98,6 +98,16 @@ def _translate_cura(text: str) -> str:
         m_time = re.search(r";TIME:(\d+)", text)
         time_secs = int(m_time.group(1)) if m_time else 0
 
+    # Compensate for firmware-level AMS purge cycles that CuraEngine doesn't
+    # model.  Each tool change (T0-T254, excluding the initial extruder select
+    # before extrusion) triggers an M620/M621 flush on real hardware (~95s).
+    _PURGE_TIME_SECS = 95
+    tool_changes = re.findall(r"^T(\d+)\s*$", text, re.MULTILINE)
+    if len(tool_changes) > 1:
+        n_purges = len([t for t in tool_changes if int(t) < 255]) - 1
+        if n_purges > 0:
+            time_secs += n_purges * _PURGE_TIME_SECS
+
     # Build per-layer elapsed time map for accurate M73 R values
     layer_elapsed: dict[int, float] = {}
     for m in re.finditer(r";LAYER:(\d+)", text):

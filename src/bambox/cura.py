@@ -265,7 +265,16 @@ def build_template_context(
         ctx["nozzle_diameter"] = float(headers["NOZZLE_DIAMETER"])
 
     if "BED_TYPE" in headers:
-        ctx["curr_bed_type"] = headers["BED_TYPE"]
+        # CuraEngine emits the internal key (e.g. "textured_pei_plate") while
+        # templates expect the display name (e.g. "Textured PEI Plate").
+        _BED_TYPE_DISPLAY: dict[str, str] = {
+            "cool_plate": "Cool Plate",
+            "engineering_plate": "Engineering Plate",
+            "high_temp_plate": "High Temp Plate",
+            "textured_pei_plate": "Textured PEI Plate",
+        }
+        raw = headers["BED_TYPE"]
+        ctx["curr_bed_type"] = _BED_TYPE_DISPLAY.get(raw, raw)
 
     # Defaults needed by templates
     ctx.setdefault("initial_extruder", 0)
