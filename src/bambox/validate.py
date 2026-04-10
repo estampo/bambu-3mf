@@ -40,6 +40,21 @@ REQUIRED_ARCHIVE_FILES = {
     "Metadata/plate_1_small.png",
 }
 
+# Thumbnail files that BambuStudio 2.5+ includes for full firmware support.
+RECOMMENDED_THUMBNAIL_FILES = {
+    "Metadata/top_1.png",
+    "Metadata/pick_1.png",
+}
+
+# Keys in project_settings that are fixed-length machine lists, NOT per-filament arrays.
+_FIXED_LIST_KEYS = {
+    "bed_exclude_area",
+    "print_compatible_printers",
+    "printable_area",
+    "start_end_points",
+    "upward_compatible_machine",
+}
+
 # Compiled regex patterns (module-level for performance on large gcode files)
 _RE_TEMP_ARRAY = re.compile(r"M10[49]\s+S\[")
 _RE_TEMP_TEMPLATE = re.compile(r"M10[49]\s+S\{")
@@ -54,6 +69,7 @@ _RE_M73_L = re.compile(r"^M73 L(\d+)", re.MULTILINE)
 _RE_M991 = re.compile(r"^M991 S0 P(\d+)", re.MULTILINE)
 _RE_M73_P = re.compile(r"^M73 P\d+", re.MULTILINE)
 _RE_M73_R = re.compile(r"^M73 P\d+ R\d+", re.MULTILINE)
+_RE_M73_R_VALUE = re.compile(r"^M73 P\d+ R(\d+)", re.MULTILINE)
 
 
 # ---------------------------------------------------------------------------
@@ -130,7 +146,9 @@ def validate_3mf_buffer(buf: IO[bytes]) -> ValidationResult:
         return ValidationResult(findings)
 
     with zf:
-        _check_required_files(set(zf.namelist()), findings)
+        names = set(zf.namelist())
+        _check_required_files(names, findings)
+        _check_recommended_thumbnails(names, findings)
 
         # Read gcode and metadata — guard against missing files
         gcode_bytes = _safe_read(zf, "Metadata/plate_1.gcode")
@@ -141,6 +159,7 @@ def validate_3mf_buffer(buf: IO[bytes]) -> ValidationResult:
         if gcode_bytes is not None and md5_stored is not None:
             _check_md5(gcode_bytes, md5_stored, findings)
 
+        gcode: str | None = None
         if gcode_bytes is not None:
             gcode = gcode_bytes.decode(errors="replace")
             _check_gcode(gcode, findings)
@@ -150,6 +169,9 @@ def validate_3mf_buffer(buf: IO[bytes]) -> ValidationResult:
 
         if project_settings_raw is not None:
             _check_project_settings(project_settings_raw, findings)
+
+        if gcode is not None and slice_info is not None:
+            _check_time_sync(gcode, slice_info, findings)
 
     return ValidationResult(findings)
 
@@ -181,6 +203,13 @@ def _check_required_files(names: set[str], findings: list[Finding]) -> None:
     missing = REQUIRED_ARCHIVE_FILES - names
     for m in sorted(missing):
         findings.append(Finding(Severity.ERROR, "E006", f"Missing required file: {m}"))
+
+
+def _check_recommended_thumbnails(names: set[str], findings: list[Finding]) -> None:
+    """W010: BambuStudio 2.5+ includes top_1.png and pick_1.png for full thumbnail support."""
+    missing = RECOMMENDED_THUMBNAIL_FILES - names
+    for m in sorted(missing):
+        findings.append(Finding(Severity.WARNING, "W010", f"Missing recommended thumbnail: {m}"))
 
 
 def _check_md5(gcode: bytes, stored: str, findings: list[Finding]) -> None:
@@ -461,7 +490,7 @@ _KNOWN_ARRAY_KEYS = {
 
 
 def _check_project_settings(raw: str, findings: list[Finding]) -> None:
-    """E004: Per-filament arrays must be padded to MIN_SLOTS."""
+    """E004/W005/W006: Validate project_settings.config."""
     try:
         settings = json.loads(raw)
     except json.JSONDecodeError:
@@ -474,6 +503,7 @@ def _check_project_settings(raw: str, findings: list[Finding]) -> None:
         )
         return
 
+    # E004: per-filament arrays must be padded to MIN_SLOTS
     for key in _KNOWN_ARRAY_KEYS:
         val = settings.get(key)
         if isinstance(val, list) and 0 < len(val) < MIN_SLOTS:
@@ -482,5 +512,73 @@ def _check_project_settings(raw: str, findings: list[Finding]) -> None:
                     Severity.ERROR,
                     "E004",
                     f"Array '{key}' has {len(val)} elements, needs {MIN_SLOTS}",
+                )
+            )
+
+    # W005: print_compatible_printers should be a list, not a per-slot broadcast
+    pcp = settings.get("print_compatible_printers")
+    if isinstance(pcp, list) and len(pcp) >= MIN_SLOTS:
+        unique = set(pcp)
+        if len(unique) == 1:
+            findings.append(
+                Finding(
+                    Severity.WARNING,
+                    "W005",
+                    "print_compatible_printers appears to be a per-slot broadcast "
+                    f"(all {len(pcp)} entries are '{next(iter(unique))}')",
+                    "Should be a flat list of compatible printer models",
+                )
+            )
+
+    # W006: printer_model should be set
+    pm = settings.get("printer_model", "")
+    if not pm:
+        findings.append(
+            Finding(Severity.WARNING, "W006", "printer_model is empty in project_settings")
+        )
+
+
+# ---------------------------------------------------------------------------
+# Time sync checks
+# ---------------------------------------------------------------------------
+
+
+def _check_time_sync(gcode: str, slice_info_xml: str, findings: list[Finding]) -> None:
+    """W011: M73 R remaining time should roughly agree with slice_info prediction."""
+    # Extract prediction from slice_info
+    try:
+        root = ET.fromstring(slice_info_xml)
+    except ET.ParseError:
+        return
+    plate = root.find("plate")
+    if plate is None:
+        return
+    meta = {el.get("key", ""): el.get("value", "") for el in plate.findall("metadata")}
+    pred_str = meta.get("prediction", "")
+    if not pred_str or pred_str == "0":
+        return
+    try:
+        prediction_secs = int(pred_str)
+    except ValueError:
+        return
+
+    # Extract max M73 R value (first one in gcode = total remaining time)
+    r_values = _RE_M73_R_VALUE.findall(gcode)
+    if not r_values:
+        return
+    m73_max_mins = max(int(v) for v in r_values)
+    m73_max_secs = m73_max_mins * 60
+
+    # Allow 30% tolerance — different estimation methods will always diverge somewhat
+    if prediction_secs > 0 and m73_max_secs > 0:
+        ratio = m73_max_secs / prediction_secs
+        if ratio < 0.5 or ratio > 2.0:
+            findings.append(
+                Finding(
+                    Severity.WARNING,
+                    "W011",
+                    f"M73 remaining time ({m73_max_mins}m) diverges from "
+                    f"slice_info prediction ({prediction_secs // 60}m)",
+                    f"ratio={ratio:.2f}, expected 0.5–2.0",
                 )
             )

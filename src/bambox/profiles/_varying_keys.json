@@ -1,6 +1,5 @@
 [
   "activate_air_filtration",
-  "bed_exclude_area",
   "close_fan_the_first_x_layers",
   "cool_plate_temp",
   "cool_plate_temp_initial_layer",
@@ -18,24 +17,17 @@
   "filament_type",
   "hot_plate_temp",
   "hot_plate_temp_initial_layer",
-  "machine_max_acceleration_z",
-  "machine_max_speed_x",
-  "machine_max_speed_y",
   "nozzle_temperature",
   "nozzle_temperature_initial_layer",
   "nozzle_temperature_range_high",
   "nozzle_temperature_range_low",
   "overhang_fan_speed",
   "overhang_fan_threshold",
-  "print_compatible_printers",
-  "printable_area",
   "slow_down_layer_time",
   "slow_down_min_speed",
-  "start_end_points",
   "supertack_plate_temp",
   "supertack_plate_temp_initial_layer",
   "temperature_vitrification",
   "textured_plate_temp",
-  "textured_plate_temp_initial_layer",
-  "upward_compatible_machine"
+  "textured_plate_temp_initial_layer"
 ]

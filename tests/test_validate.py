@@ -114,6 +114,8 @@ def _build_valid_3mf(
         zf.writestr("Metadata/plate_1.png", b"\x89PNG\r\n\x1a\n")
         zf.writestr("Metadata/plate_no_light_1.png", b"\x89PNG\r\n\x1a\n")
         zf.writestr("Metadata/plate_1_small.png", b"\x89PNG\r\n\x1a\n")
+        zf.writestr("Metadata/top_1.png", b"\x89PNG\r\n\x1a\n")
+        zf.writestr("Metadata/pick_1.png", b"\x89PNG\r\n\x1a\n")
     return out
 
 
@@ -533,3 +535,143 @@ class TestCLIValidate:
 
         with pytest.raises(SystemExit, match="1"):
             main(["validate", str(tmp_path / "nonexistent.gcode.3mf")])
+
+
+# ---------------------------------------------------------------------------
+# W005: print_compatible_printers broadcast
+# ---------------------------------------------------------------------------
+
+
+class TestCompatiblePrinters:
+    def test_broadcast_detected(self, tmp_path: Path) -> None:
+        settings = json.dumps(
+            {
+                "filament_type": ["PLA"] * 5,
+                "filament_colour": ["#F2754E"] * 5,
+                "nozzle_temperature": ["220"] * 5,
+                "nozzle_temperature_initial_layer": ["220"] * 5,
+                "bed_temperature": ["60"] * 5,
+                "filament_max_volumetric_speed": ["12"] * 5,
+                "print_compatible_printers": ["Bambu Lab X1 Carbon 0.4 nozzle"] * 5,
+            }
+        )
+        path = _build_valid_3mf(tmp_path, settings=settings)
+        result = validate_3mf(path)
+        assert any(f.code == "W005" for f in result.warnings)
+
+    def test_proper_list_passes(self, tmp_path: Path) -> None:
+        settings = json.dumps(
+            {
+                "filament_type": ["PLA"] * 5,
+                "filament_colour": ["#F2754E"] * 5,
+                "nozzle_temperature": ["220"] * 5,
+                "nozzle_temperature_initial_layer": ["220"] * 5,
+                "bed_temperature": ["60"] * 5,
+                "filament_max_volumetric_speed": ["12"] * 5,
+                "print_compatible_printers": [
+                    "Bambu Lab X1 Carbon 0.4 nozzle",
+                    "Bambu Lab X1 0.4 nozzle",
+                    "Bambu Lab P1S 0.4 nozzle",
+                    "Bambu Lab X1E 0.4 nozzle",
+                ],
+            }
+        )
+        path = _build_valid_3mf(tmp_path, settings=settings)
+        result = validate_3mf(path)
+        assert not any(f.code == "W005" for f in result.findings)
+
+
+# ---------------------------------------------------------------------------
+# W006: printer_model
+# ---------------------------------------------------------------------------
+
+
+class TestPrinterModel:
+    def test_empty_printer_model(self, tmp_path: Path) -> None:
+        settings = json.dumps(
+            {
+                "filament_type": ["PLA"] * 5,
+                "filament_colour": ["#F2754E"] * 5,
+                "nozzle_temperature": ["220"] * 5,
+                "nozzle_temperature_initial_layer": ["220"] * 5,
+                "bed_temperature": ["60"] * 5,
+                "filament_max_volumetric_speed": ["12"] * 5,
+                "printer_model": "",
+            }
+        )
+        path = _build_valid_3mf(tmp_path, settings=settings)
+        result = validate_3mf(path)
+        assert any(f.code == "W006" for f in result.warnings)
+
+    def test_present_printer_model_passes(self, tmp_path: Path) -> None:
+        settings = json.dumps(
+            {
+                "filament_type": ["PLA"] * 5,
+                "filament_colour": ["#F2754E"] * 5,
+                "nozzle_temperature": ["220"] * 5,
+                "nozzle_temperature_initial_layer": ["220"] * 5,
+                "bed_temperature": ["60"] * 5,
+                "filament_max_volumetric_speed": ["12"] * 5,
+                "printer_model": "Bambu Lab P1S",
+            }
+        )
+        path = _build_valid_3mf(tmp_path, settings=settings)
+        result = validate_3mf(path)
+        assert not any(f.code == "W006" for f in result.findings)
+
+
+# ---------------------------------------------------------------------------
+# W010: Recommended thumbnails
+# ---------------------------------------------------------------------------
+
+
+class TestRecommendedThumbnails:
+    def test_missing_top_and_pick(self, tmp_path: Path) -> None:
+        """Archive without top_1.png and pick_1.png triggers W010."""
+        out = tmp_path / "test.gcode.3mf"
+        gcode_bytes = _MINIMAL_GCODE.encode()
+        md5 = hashlib.md5(gcode_bytes).hexdigest().upper()
+        with zipfile.ZipFile(out, "w") as zf:
+            zf.writestr("[Content_Types].xml", "<Types/>")
+            zf.writestr("_rels/.rels", "<Relationships/>")
+            zf.writestr("3D/3dmodel.model", "<model/>")
+            zf.writestr("Metadata/plate_1.gcode", gcode_bytes)
+            zf.writestr("Metadata/plate_1.gcode.md5", md5)
+            zf.writestr("Metadata/model_settings.config", "{}")
+            zf.writestr("Metadata/_rels/model_settings.config.rels", "<Relationships/>")
+            zf.writestr("Metadata/slice_info.config", _MINIMAL_SLICE_INFO)
+            zf.writestr("Metadata/project_settings.config", _MINIMAL_SETTINGS)
+            zf.writestr("Metadata/plate_1.json", "{}")
+            zf.writestr("Metadata/plate_1.png", b"\x89PNG\r\n\x1a\n")
+            zf.writestr("Metadata/plate_no_light_1.png", b"\x89PNG\r\n\x1a\n")
+            zf.writestr("Metadata/plate_1_small.png", b"\x89PNG\r\n\x1a\n")
+            # Deliberately omit top_1.png and pick_1.png
+        result = validate_3mf(out)
+        w010 = [f for f in result.warnings if f.code == "W010"]
+        assert len(w010) == 2
+
+    def test_with_thumbnails_passes(self, tmp_path: Path) -> None:
+        path = _build_valid_3mf(tmp_path)
+        result = validate_3mf(path)
+        assert not any(f.code == "W010" for f in result.findings)
+
+
+# ---------------------------------------------------------------------------
+# W011: Time sync
+# ---------------------------------------------------------------------------
+
+
+class TestTimeSync:
+    def test_divergent_time_detected(self, tmp_path: Path) -> None:
+        """M73 R2 (2 min) vs prediction 7200s (120 min) should trigger W011."""
+        gcode = _MINIMAL_GCODE  # has M73 P0 R2 at start
+        si = _MINIMAL_SLICE_INFO.replace('value="150"', 'value="7200"')
+        path = _build_valid_3mf(tmp_path, gcode=gcode, slice_info=si)
+        result = validate_3mf(path)
+        assert any(f.code == "W011" for f in result.warnings)
+
+    def test_aligned_time_passes(self, tmp_path: Path) -> None:
+        """M73 R2 (2 min = 120s) vs prediction 150s — within tolerance."""
+        path = _build_valid_3mf(tmp_path)
+        result = validate_3mf(path)
+        assert not any(f.code == "W011" for f in result.findings)
