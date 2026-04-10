@@ -9,6 +9,8 @@ import pytest
 
 from bambox.cli import (
     _assign_filament_slots,
+    _format_progress_bar,
+    _format_status,
     _parse_filament_args,
     main,
 )
@@ -611,3 +613,176 @@ class TestMainDispatch:
         # argparse exits with code 2 for unrecognized args
         with pytest.raises(SystemExit, match="2"):
             main(["--nonexistent-flag"])
+
+
+# ---------------------------------------------------------------------------
+# _format_status / _format_progress_bar
+# ---------------------------------------------------------------------------
+
+
+class TestFormatProgressBar:
+    def test_zero_percent(self) -> None:
+        bar = _format_progress_bar(0, width=10)
+        assert bar == "[░░░░░░░░░░] 0%"
+
+    def test_hundred_percent(self) -> None:
+        bar = _format_progress_bar(100, width=10)
+        assert bar == "[██████████] 100%"
+
+    def test_fifty_percent(self) -> None:
+        bar = _format_progress_bar(50, width=10)
+        assert bar == "[█████░░░░░] 50%"
+
+    def test_clamps_above_100(self) -> None:
+        bar = _format_progress_bar(120, width=10)
+        assert bar == "[██████████] 100%"
+
+    def test_clamps_below_0(self) -> None:
+        bar = _format_progress_bar(-5, width=10)
+        assert bar == "[░░░░░░░░░░] 0%"
+
+    def test_default_width(self) -> None:
+        bar = _format_progress_bar(50)
+        # Default width=24, half filled = 12
+        assert bar.startswith("[")
+        assert "50%" in bar
+
+
+class TestFormatStatus:
+    def test_idle_no_color(self) -> None:
+        status = {"gcode_state": "IDLE", "nozzle_temper": 25, "bed_temper": 22}
+        text = _format_status(status, use_color=False)
+        assert "State: IDLE" in text
+        assert "25\u00b0C" in text
+        assert "22\u00b0C" in text
+
+    def test_running_with_color(self) -> None:
+        status = {"gcode_state": "RUNNING", "nozzle_temper": 220, "bed_temper": 60}
+        text = _format_status(status, use_color=True)
+        assert "\033[32m" in text  # green
+        assert "\033[0m" in text  # reset
+        assert "RUNNING" in text
+
+    def test_failed_color(self) -> None:
+        status = {"gcode_state": "FAILED", "nozzle_temper": 0, "bed_temper": 0}
+        text = _format_status(status, use_color=True)
+        assert "\033[31m" in text  # red
+
+    def test_pause_color(self) -> None:
+        status = {"gcode_state": "PAUSE", "nozzle_temper": 0, "bed_temper": 0}
+        text = _format_status(status, use_color=True)
+        assert "\033[33m" in text  # yellow
+
+    def test_finish_color(self) -> None:
+        status = {"gcode_state": "FINISH", "nozzle_temper": 0, "bed_temper": 0}
+        text = _format_status(status, use_color=True)
+        assert "\033[34m" in text  # blue
+
+    def test_unknown_state_no_color_escape(self) -> None:
+        status = {"gcode_state": "WEIRD", "nozzle_temper": 0, "bed_temper": 0}
+        text = _format_status(status, use_color=True)
+        assert "\033[" not in text
+        assert "WEIRD" in text
+
+    def test_progress_bar_rendered(self) -> None:
+        status = {
+            "gcode_state": "RUNNING",
+            "nozzle_temper": 220,
+            "bed_temper": 60,
+            "mc_percent": 42,
+            "mc_remaining_time": 83,
+        }
+        text = _format_status(status, use_color=False)
+        assert "42%" in text
+        assert "1h 23m" in text
+        assert "█" in text
+
+    def test_progress_no_eta(self) -> None:
+        status = {
+            "gcode_state": "RUNNING",
+            "nozzle_temper": 220,
+            "bed_temper": 60,
+            "mc_percent": 10,
+            "mc_remaining_time": None,
+        }
+        text = _format_status(status, use_color=False)
+        assert "10%" in text
+        assert "ETA ?" in text
+
+    def test_subtask_name(self) -> None:
+        status = {
+            "gcode_state": "RUNNING",
+            "nozzle_temper": 220,
+            "bed_temper": 60,
+            "subtask_name": "benchy.3mf",
+        }
+        text = _format_status(status, use_color=False)
+        assert "benchy.3mf" in text
+
+    def test_ams_trays_included(self) -> None:
+        status = {"gcode_state": "IDLE", "nozzle_temper": 25, "bed_temper": 22}
+        trays = [{"phys_slot": 0, "type": "PLA", "color": "FFFFFF", "tray_info_idx": "GFL00"}]
+        text = _format_status(status, ams_trays=trays, use_color=False)
+        assert "AMS trays" in text
+        assert "PLA" in text
+
+    def test_eta_minutes_only(self) -> None:
+        status = {
+            "gcode_state": "RUNNING",
+            "nozzle_temper": 220,
+            "bed_temper": 60,
+            "mc_percent": 90,
+            "mc_remaining_time": 5,
+        }
+        text = _format_status(status, use_color=False)
+        assert "5m" in text
+        # Should NOT have hours
+        assert "0h" not in text
+
+
+class TestStatusWatchArgs:
+    """Test that --watch and --interval flags are parsed correctly."""
+
+    def test_watch_flag_parsed(self) -> None:
+        creds = {"token": "tok"}
+        status = {"gcode_state": "IDLE", "nozzle_temper": 25, "bed_temper": 22}
+        token = MagicMock()
+
+        with (
+            patch("bambox.bridge.load_credentials", return_value=creds),
+            patch("bambox.bridge._write_token_json", return_value=token),
+            patch("bambox.bridge.query_status", return_value=status),
+            patch("bambox.bridge.parse_ams_trays", return_value=[]),
+            patch("time.sleep", side_effect=KeyboardInterrupt),
+        ):
+            main(["status", "DEVICE123", "--watch"])
+        # If we get here without error, the watch loop ran and exited on KeyboardInterrupt
+
+    def test_interval_flag_parsed(self) -> None:
+        creds = {"token": "tok"}
+        status = {"gcode_state": "IDLE", "nozzle_temper": 25, "bed_temper": 22}
+        token = MagicMock()
+
+        with (
+            patch("bambox.bridge.load_credentials", return_value=creds),
+            patch("bambox.bridge._write_token_json", return_value=token),
+            patch("bambox.bridge.query_status", return_value=status),
+            patch("bambox.bridge.parse_ams_trays", return_value=[]),
+            patch("time.sleep", side_effect=KeyboardInterrupt) as mock_sleep,
+        ):
+            main(["status", "DEVICE123", "--watch", "--interval", "5"])
+        mock_sleep.assert_called_once_with(5)
+
+    def test_watch_short_flag(self) -> None:
+        creds = {"token": "tok"}
+        status = {"gcode_state": "IDLE", "nozzle_temper": 25, "bed_temper": 22}
+        token = MagicMock()
+
+        with (
+            patch("bambox.bridge.load_credentials", return_value=creds),
+            patch("bambox.bridge._write_token_json", return_value=token),
+            patch("bambox.bridge.query_status", return_value=status),
+            patch("bambox.bridge.parse_ams_trays", return_value=[]),
+            patch("time.sleep", side_effect=KeyboardInterrupt),
+        ):
+            main(["status", "DEVICE123", "-w", "-i", "3"])

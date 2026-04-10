@@ -455,7 +455,8 @@ int bambu_shim_start_print(
     const BambuShimPrintParams* p,
     shim_on_print_progress_fn progress_cb,
     void* progress_ctx,
-    BambuShimPrintResult* result
+    BambuShimPrintResult* result,
+    const int* cancel_flag
 ) {
     if (!fp_start_print) return -1;
 
@@ -517,7 +518,9 @@ int bambu_shim_start_print(
         else if (status == 7) { result->print_result = code; result->finished = 1; }
     };
 
-    WasCancelledFn cancel_fn = []() -> bool { return false; };
+    WasCancelledFn cancel_fn = [cancel_flag]() -> bool {
+        return cancel_flag && __atomic_load_n(cancel_flag, __ATOMIC_ACQUIRE) != 0;
+    };
     OnWaitFn wait_fn = [](int, std::string) -> bool { return false; };
 
     result->return_code = fp_start_print(agent, params, update_fn, cancel_fn, wait_fn);

@@ -4,9 +4,9 @@
 //! configure → login → connect → subscribe → send/receive messages.
 
 use std::ffi::CString;
-use std::os::raw::{c_char, c_void};
+use std::os::raw::{c_char, c_int, c_void};
 use std::path::Path;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicI32, Ordering};
 use std::time::Duration;
 
 use crate::callbacks::{self, CallbackState};
@@ -179,6 +179,8 @@ pub struct BambuAgent {
     state: Box<CallbackState>,
     /// Base directory for cert/config/log files.
     data_dir: String,
+    /// Flag checked by WasCancelledFn during file upload. Set to non-zero to cancel.
+    cancel_flag: AtomicI32,
 }
 
 // The agent pointer is thread-safe (the .so manages its own locking)
@@ -243,6 +245,7 @@ impl BambuAgent {
             agent,
             state,
             data_dir,
+            cancel_flag: AtomicI32::new(0),
         };
         this.configure()?;
         Ok(this)
@@ -530,11 +533,15 @@ impl BambuAgent {
             finished: 0,
         };
 
+        // Reset cancel flag before starting
+        self.cancel_flag.store(0, Ordering::SeqCst);
+
         // Retry on enc flag not ready (-3140)
         for attempt in 0..5 {
             result.print_result = -999;
             result.finished = 0;
 
+            let cancel_ptr = &self.cancel_flag as *const AtomicI32 as *const c_int;
             let ret = unsafe {
                 ffi::bambu_shim_start_print(
                     self.agent,
@@ -542,6 +549,7 @@ impl BambuAgent {
                     print_progress_callback,
                     std::ptr::null_mut(),
                     &mut result,
+                    cancel_ptr,
                 )
             };
 
@@ -575,6 +583,16 @@ impl BambuAgent {
         })
     }
 
+    /// Cancel the current in-flight print (if any).
+    ///
+    /// Sets the atomic cancel flag that the C++ `WasCancelledFn` lambda polls
+    /// during file upload. The .so checks this flag periodically and aborts
+    /// the upload when it sees a non-zero value.
+    pub fn cancel_current_print(&self) {
+        self.cancel_flag.store(1, Ordering::SeqCst);
+        tracing::info!("cancel flag set");
+    }
+
     /// Drain all buffered MQTT messages.
     pub fn drain_messages(&self) -> Vec<callbacks::MqttMessage> {
         self.state.drain_messages()
@@ -599,6 +617,7 @@ impl BambuAgent {
             agent: std::ptr::null_mut(),
             state: Box::new(CallbackState::new()),
             data_dir: "/tmp/bambu_agent".to_string(),
+            cancel_flag: AtomicI32::new(0),
         }
     }
 
@@ -855,6 +874,19 @@ email = "user@example.com"
         let path = std::path::PathBuf::from("/tmp/nonexistent_creds_12345.toml");
         let err = Credentials::from_toml(&path).unwrap_err();
         assert!(err.contains("cannot read"));
+    }
+
+    #[test]
+    fn cancel_flag_initially_zero() {
+        let agent = unsafe { BambuAgent::test_null() };
+        assert_eq!(agent.cancel_flag.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn cancel_sets_flag() {
+        let agent = unsafe { BambuAgent::test_null() };
+        agent.cancel_current_print();
+        assert_eq!(agent.cancel_flag.load(Ordering::SeqCst), 1);
     }
 
     #[test]

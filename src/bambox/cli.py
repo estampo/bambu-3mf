@@ -6,6 +6,7 @@ import argparse
 import json
 import logging
 import sys
+import time
 from importlib.metadata import version
 from pathlib import Path
 
@@ -264,7 +265,7 @@ def _cmd_repack(args: argparse.Namespace) -> None:
 
 def _cmd_validate(args: argparse.Namespace) -> None:
     """Validate a .gcode.3mf archive."""
-    from bambox.validate import Severity, validate_3mf
+    from bambox.validate import Severity, compare_3mf, validate_3mf
 
     if not args.threemf.exists():
         print(f"Error: {args.threemf} not found", file=sys.stderr)
@@ -272,8 +273,19 @@ def _cmd_validate(args: argparse.Namespace) -> None:
 
     result = validate_3mf(args.threemf)
 
+    # Run reference comparison if requested
+    ref_result = None
+    if args.reference:
+        if not args.reference.exists():
+            print(f"Error: reference {args.reference} not found", file=sys.stderr)
+            sys.exit(1)
+        ref_result = compare_3mf(args.threemf, args.reference)
+
     if args.json_output:
-        print(json.dumps(result.to_dict(), indent=2))
+        output = result.to_dict()
+        if ref_result is not None:
+            output["comparison"] = ref_result.to_dict()
+        print(json.dumps(output, indent=2))
     else:
         name = args.threemf.name
         for f in result.findings:
@@ -286,19 +298,34 @@ def _cmd_validate(args: argparse.Namespace) -> None:
                 line += f" [{f.detail}]"
             print(line)
 
+        if ref_result is not None:
+            for f in ref_result.findings:
+                if f.severity == Severity.ERROR:
+                    prefix = f"  COMP  {f.code}"
+                else:
+                    prefix = f"  COMP  {f.code}"
+                line = f"{prefix}: {f.message}"
+                if f.detail:
+                    line += f" [{f.detail}]"
+                print(line)
+
         n_err = len(result.errors)
         n_warn = len(result.warnings)
-        if n_err == 0 and n_warn == 0:
+        n_comp = len(ref_result.errors) if ref_result else 0
+        total_err = n_err + n_comp
+
+        if total_err == 0 and n_warn == 0:
             print(f"{name}: valid")
-        elif n_err == 0:
+        elif total_err == 0:
             print(f"{name}: valid ({n_warn} warning{'s' if n_warn != 1 else ''})")
         else:
             print(
-                f"{name}: INVALID ({n_err} error{'s' if n_err != 1 else ''}, "
+                f"{name}: INVALID ({total_err} error{'s' if total_err != 1 else ''}, "
                 f"{n_warn} warning{'s' if n_warn != 1 else ''})"
             )
 
-    if not result.valid:
+    has_errors = not result.valid or (ref_result is not None and not ref_result.valid)
+    if has_errors:
         sys.exit(1)
     if args.strict and result.warnings:
         sys.exit(1)
@@ -539,6 +566,82 @@ def _show_ams_mapping(threemf: Path, ams_trays: list[dict], mapping: list[int]) 
     print()
 
 
+_STATE_COLORS: dict[str, str] = {
+    "IDLE": "\033[2m",
+    "RUNNING": "\033[32m",
+    "PAUSE": "\033[33m",
+    "FINISH": "\033[34m",
+    "FAILED": "\033[31m",
+}
+_RESET = "\033[0m"
+
+
+def _format_progress_bar(percent: int, width: int = 24) -> str:
+    """Render a simple progress bar string from a percentage (0-100)."""
+    percent = max(0, min(100, percent))
+    filled = round(width * percent / 100)
+    empty = width - filled
+    return f"[{'█' * filled}{'░' * empty}] {percent}%"
+
+
+def _format_status(
+    status: dict,
+    ams_trays: list[dict] | None = None,
+    use_color: bool = True,
+) -> str:
+    """Format printer status dict into a human-readable string.
+
+    Parameters
+    ----------
+    status:
+        Raw status dict from the bridge (keys: gcode_state, nozzle_temper, etc.)
+    ams_trays:
+        Parsed AMS tray list, or *None* to omit AMS section.
+    use_color:
+        When *True*, apply ANSI colour escapes to the gcode_state line.
+    """
+    lines: list[str] = []
+
+    state = status.get("gcode_state", "?")
+    if use_color:
+        color = _STATE_COLORS.get(state, "")
+        reset = _RESET if color else ""
+        lines.append(f"State: {color}{state}{reset}")
+    else:
+        lines.append(f"State: {state}")
+
+    nozzle = status.get("nozzle_temper", "?")
+    bed = status.get("bed_temper", "?")
+    lines.append(f"Nozzle: {nozzle}\u00b0C  Bed: {bed}\u00b0C")
+
+    mc_percent = status.get("mc_percent")
+    if mc_percent:
+        bar = _format_progress_bar(int(mc_percent))
+        remaining = status.get("mc_remaining_time", "?")
+        if remaining != "?" and remaining is not None:
+            try:
+                mins = int(remaining)
+                hrs, m = divmod(mins, 60)
+                eta_str = f"{hrs}h {m:02d}m" if hrs else f"{m}m"
+            except (ValueError, TypeError):
+                eta_str = f"{remaining}min"
+        else:
+            eta_str = "?"
+        lines.append(f"Progress: {bar}  ETA {eta_str}")
+
+    if status.get("subtask_name"):
+        lines.append(f"Job: {status['subtask_name']}")
+
+    if ams_trays:
+        lines.append("AMS trays:")
+        for t in ams_trays:
+            lines.append(
+                f"  Slot {t['phys_slot']}: {t['type']} #{t['color']} ({t['tray_info_idx']})"
+            )
+
+    return "\n".join(lines)
+
+
 def _cmd_status(args: argparse.Namespace) -> None:
     """Query printer status."""
     from bambox.bridge import _write_token_json, load_credentials, parse_ams_trays, query_status
@@ -553,25 +656,25 @@ def _cmd_status(args: argparse.Namespace) -> None:
     credentials = load_credentials(creds_path)
     token_file = _write_token_json(credentials)
     try:
-        status = query_status(device_id, token_file, verbose=args.verbose)
-        # Show key info
-        state = status.get("gcode_state", "?")
-        nozzle = status.get("nozzle_temper", "?")
-        bed = status.get("bed_temper", "?")
-        print(f"State: {state}")
-        print(f"Nozzle: {nozzle}°C  Bed: {bed}°C")
-        if status.get("mc_percent"):
-            print(
-                f"Progress: {status['mc_percent']}%  ETA: {status.get('mc_remaining_time', '?')}min"
-            )
-        if status.get("subtask_name"):
-            print(f"Job: {status['subtask_name']}")
+        watch = getattr(args, "watch", False)
+        interval = getattr(args, "interval", 10)
 
-        trays = parse_ams_trays(status)
-        if trays:
-            print("AMS trays:")
-            for t in trays:
-                print(f"  Slot {t['phys_slot']}: {t['type']} #{t['color']} ({t['tray_info_idx']})")
+        if watch:
+            # Watch mode: clear screen and loop until Ctrl-C
+            try:
+                while True:
+                    sys.stdout.write("\033[2J\033[H")
+                    sys.stdout.flush()
+                    status = query_status(device_id, token_file, verbose=args.verbose)
+                    trays = parse_ams_trays(status)
+                    print(_format_status(status, ams_trays=trays))
+                    time.sleep(interval)
+            except KeyboardInterrupt:
+                print()  # clean line after ^C
+        else:
+            status = query_status(device_id, token_file, verbose=args.verbose)
+            trays = parse_ams_trays(status)
+            print(_format_status(status, ams_trays=trays))
     finally:
         try:
             token_file.unlink()
@@ -804,6 +907,12 @@ def main(argv: list[str] | None = None) -> None:
         action="store_true",
         help="Treat warnings as errors (non-zero exit)",
     )
+    validate_p.add_argument(
+        "--reference",
+        type=Path,
+        default=None,
+        help="Reference .gcode.3mf to compare against",
+    )
 
     # --- status subcommand ---
     status_p = sub.add_parser("status", help="Query printer status")
@@ -816,6 +925,19 @@ def main(argv: list[str] | None = None) -> None:
         "--credentials",
         default=None,
         help="Path to credentials.toml",
+    )
+    status_p.add_argument(
+        "-w",
+        "--watch",
+        action="store_true",
+        help="Continuously refresh status display",
+    )
+    status_p.add_argument(
+        "-i",
+        "--interval",
+        type=int,
+        default=10,
+        help="Seconds between refreshes in watch mode (default: 10)",
     )
 
     args = parser.parse_args(argv)

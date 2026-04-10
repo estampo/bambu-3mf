@@ -146,5 +146,6 @@ extern "C" {
         progress_cb: OnPrintProgressFn,
         progress_ctx: *mut c_void,
         result: *mut ShimPrintResult,
+        cancel_flag: *const c_int,
     ) -> c_int;
 }

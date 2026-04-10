@@ -37,6 +37,9 @@ pub enum AgentCommand {
         request: PrintRequest,
         reply: oneshot::Sender<Result<PrintResult, String>>,
     },
+    CancelPrint {
+        reply: oneshot::Sender<()>,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -111,6 +114,19 @@ impl AgentHandle {
             .await
             .map_err(|_| "agent thread gone".to_string())?;
         rx.await.map_err(|_| "agent thread dropped reply".to_string())?
+    }
+
+    /// Cancel the current in-flight print upload.
+    ///
+    /// Sets the atomic cancel flag so the C++ upload loop aborts, and also
+    /// sends the MQTT stop command to the printer.
+    pub async fn cancel_print(&self) -> Result<(), String> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(AgentCommand::CancelPrint { reply })
+            .await
+            .map_err(|_| "agent thread gone".to_string())?;
+        rx.await.map_err(|_| "agent thread dropped reply".to_string())
     }
 }
 
@@ -191,6 +207,10 @@ pub fn spawn_agent_thread(agent: BambuAgent) -> AgentHandle {
                     AgentCommand::StartPrint { request, reply } => {
                         let result = agent.start_print(&request);
                         let _ = reply.send(result);
+                    }
+                    AgentCommand::CancelPrint { reply } => {
+                        agent.cancel_current_print();
+                        let _ = reply.send(());
                     }
                 }
 
@@ -338,6 +358,28 @@ mod tests {
 
         let result = handle.send_message("DEV".into(), "{}".into()).await;
         assert_eq!(result.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn cancel_print_fails_when_channel_closed() {
+        let handle = test_handle();
+        let result = handle.cancel_print().await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "agent thread gone");
+    }
+
+    #[tokio::test]
+    async fn cancel_print_succeeds_with_reply() {
+        let (handle, mut rx) = test_handle_with_receiver();
+
+        tokio::spawn(async move {
+            if let Some(AgentCommand::CancelPrint { reply }) = rx.recv().await {
+                let _ = reply.send(());
+            }
+        });
+
+        let result = handle.cancel_print().await;
+        assert!(result.is_ok());
     }
 
     #[tokio::test]

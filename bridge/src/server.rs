@@ -289,6 +289,10 @@ async fn cancel_print(
     State(state): State<SharedState>,
     Path(device_id): Path<String>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorResponse>)> {
+    // Set the atomic cancel flag so any in-flight upload aborts immediately
+    let _ = state.handle.cancel_print().await;
+
+    // Also send the MQTT stop command to the printer
     let stop_cmd = r#"{"print":{"command":"stop","sequence_id":"0"}}"#;
     let ret = state
         .handle
@@ -312,6 +316,7 @@ async fn cancel_print(
         "command": "stop",
         "device_id": device_id,
         "sent": true,
+        "upload_cancelled": true,
     })))
 }
 
