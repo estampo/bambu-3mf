@@ -6,6 +6,7 @@ import argparse
 import json
 import logging
 import sys
+import time
 from importlib.metadata import version
 from pathlib import Path
 
@@ -539,6 +540,82 @@ def _show_ams_mapping(threemf: Path, ams_trays: list[dict], mapping: list[int]) 
     print()
 
 
+_STATE_COLORS: dict[str, str] = {
+    "IDLE": "\033[2m",
+    "RUNNING": "\033[32m",
+    "PAUSE": "\033[33m",
+    "FINISH": "\033[34m",
+    "FAILED": "\033[31m",
+}
+_RESET = "\033[0m"
+
+
+def _format_progress_bar(percent: int, width: int = 24) -> str:
+    """Render a simple progress bar string from a percentage (0-100)."""
+    percent = max(0, min(100, percent))
+    filled = round(width * percent / 100)
+    empty = width - filled
+    return f"[{'█' * filled}{'░' * empty}] {percent}%"
+
+
+def _format_status(
+    status: dict,
+    ams_trays: list[dict] | None = None,
+    use_color: bool = True,
+) -> str:
+    """Format printer status dict into a human-readable string.
+
+    Parameters
+    ----------
+    status:
+        Raw status dict from the bridge (keys: gcode_state, nozzle_temper, etc.)
+    ams_trays:
+        Parsed AMS tray list, or *None* to omit AMS section.
+    use_color:
+        When *True*, apply ANSI colour escapes to the gcode_state line.
+    """
+    lines: list[str] = []
+
+    state = status.get("gcode_state", "?")
+    if use_color:
+        color = _STATE_COLORS.get(state, "")
+        reset = _RESET if color else ""
+        lines.append(f"State: {color}{state}{reset}")
+    else:
+        lines.append(f"State: {state}")
+
+    nozzle = status.get("nozzle_temper", "?")
+    bed = status.get("bed_temper", "?")
+    lines.append(f"Nozzle: {nozzle}\u00b0C  Bed: {bed}\u00b0C")
+
+    mc_percent = status.get("mc_percent")
+    if mc_percent:
+        bar = _format_progress_bar(int(mc_percent))
+        remaining = status.get("mc_remaining_time", "?")
+        if remaining != "?" and remaining is not None:
+            try:
+                mins = int(remaining)
+                hrs, m = divmod(mins, 60)
+                eta_str = f"{hrs}h {m:02d}m" if hrs else f"{m}m"
+            except (ValueError, TypeError):
+                eta_str = f"{remaining}min"
+        else:
+            eta_str = "?"
+        lines.append(f"Progress: {bar}  ETA {eta_str}")
+
+    if status.get("subtask_name"):
+        lines.append(f"Job: {status['subtask_name']}")
+
+    if ams_trays:
+        lines.append("AMS trays:")
+        for t in ams_trays:
+            lines.append(
+                f"  Slot {t['phys_slot']}: {t['type']} #{t['color']} ({t['tray_info_idx']})"
+            )
+
+    return "\n".join(lines)
+
+
 def _cmd_status(args: argparse.Namespace) -> None:
     """Query printer status."""
     from bambox.bridge import _write_token_json, load_credentials, parse_ams_trays, query_status
@@ -553,25 +630,25 @@ def _cmd_status(args: argparse.Namespace) -> None:
     credentials = load_credentials(creds_path)
     token_file = _write_token_json(credentials)
     try:
-        status = query_status(device_id, token_file, verbose=args.verbose)
-        # Show key info
-        state = status.get("gcode_state", "?")
-        nozzle = status.get("nozzle_temper", "?")
-        bed = status.get("bed_temper", "?")
-        print(f"State: {state}")
-        print(f"Nozzle: {nozzle}°C  Bed: {bed}°C")
-        if status.get("mc_percent"):
-            print(
-                f"Progress: {status['mc_percent']}%  ETA: {status.get('mc_remaining_time', '?')}min"
-            )
-        if status.get("subtask_name"):
-            print(f"Job: {status['subtask_name']}")
+        watch = getattr(args, "watch", False)
+        interval = getattr(args, "interval", 10)
 
-        trays = parse_ams_trays(status)
-        if trays:
-            print("AMS trays:")
-            for t in trays:
-                print(f"  Slot {t['phys_slot']}: {t['type']} #{t['color']} ({t['tray_info_idx']})")
+        if watch:
+            # Watch mode: clear screen and loop until Ctrl-C
+            try:
+                while True:
+                    sys.stdout.write("\033[2J\033[H")
+                    sys.stdout.flush()
+                    status = query_status(device_id, token_file, verbose=args.verbose)
+                    trays = parse_ams_trays(status)
+                    print(_format_status(status, ams_trays=trays))
+                    time.sleep(interval)
+            except KeyboardInterrupt:
+                print()  # clean line after ^C
+        else:
+            status = query_status(device_id, token_file, verbose=args.verbose)
+            trays = parse_ams_trays(status)
+            print(_format_status(status, ams_trays=trays))
     finally:
         try:
             token_file.unlink()
@@ -816,6 +893,19 @@ def main(argv: list[str] | None = None) -> None:
         "--credentials",
         default=None,
         help="Path to credentials.toml",
+    )
+    status_p.add_argument(
+        "-w",
+        "--watch",
+        action="store_true",
+        help="Continuously refresh status display",
+    )
+    status_p.add_argument(
+        "-i",
+        "--interval",
+        type=int,
+        default=10,
+        help="Seconds between refreshes in watch mode (default: 10)",
     )
 
     args = parser.parse_args(argv)
