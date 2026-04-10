@@ -398,7 +398,7 @@ class TestXmlEscaping:
         meta = {m.get("key"): m.get("value") for m in root.findall(".//metadata")}
         assert meta["printer_model_id"] == "P1S&<test>"
 
-    def test_extra_attrs_escaped(self) -> None:
+    def test_filament_attrs_escaped(self) -> None:
         info = SliceInfo(
             filaments=[
                 FilamentInfo(
@@ -408,7 +408,7 @@ class TestXmlEscaping:
                     color="#FFFFFF",
                     used_m=1.0,
                     used_g=2.0,
-                    extra_attrs={"note": 'a&b<c"d'},
+                    volume_type='Std&<"test>',
                 ),
             ],
         )
@@ -416,7 +416,23 @@ class TestXmlEscaping:
         root = ET.fromstring(xml)
         fil = root.find(".//filament")
         assert fil is not None
-        assert fil.get("note") == 'a&b<c"d'
+        assert fil.get("volume_type") == 'Std&<"test>'
+
+    def test_filament_bbs25_attrs(self) -> None:
+        info = SliceInfo(
+            filaments=[
+                FilamentInfo(slot=1, filament_type="PLA", color="#FFFFFF"),
+            ],
+        )
+        xml = _slice_info_xml(info)
+        root = ET.fromstring(xml)
+        fil = root.find(".//filament")
+        assert fil is not None
+        assert fil.get("used_for_object") == "true"
+        assert fil.get("used_for_support") == "false"
+        assert fil.get("group_id") == "0"
+        assert fil.get("nozzle_diameter") == "0.40"
+        assert fil.get("volume_type") == "Standard"
 
 
 # ---------------------------------------------------------------------------

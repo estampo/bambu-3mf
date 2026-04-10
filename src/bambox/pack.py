@@ -148,8 +148,12 @@ class FilamentInfo:
     color: str = "#F2754E"
     used_m: float = 0.0  # metres of filament used
     used_g: float = 0.0  # grams of filament used
-    # BBS 02.05+ extra attributes (omitted from XML if empty)
-    extra_attrs: dict[str, str] | None = None  # e.g. {"used_for_object": "true", ...}
+    # BBS 02.05+ attributes
+    used_for_object: bool = True
+    used_for_support: bool = False
+    group_id: int = 0
+    nozzle_diameter: float = 0.4
+    volume_type: str = "Standard"
 
 
 @dataclass
@@ -167,6 +171,7 @@ class SliceInfo:
     filaments: list[FilamentInfo] = field(default_factory=list)
     objects: list[ObjectInfo] = field(default_factory=list)
     warnings: list[WarningInfo] = field(default_factory=list)
+    bed_type: str = "textured_plate"  # plate_1.json bed type
     plate_data: dict[str, object] | None = None  # raw plate_1.json passthrough
     application: str = "BambuStudio-02.05.00.66"
     model_xml: str = ""  # raw 3D/3dmodel.model passthrough (overrides application)
@@ -264,13 +269,13 @@ def _slice_info_xml(info: SliceInfo) -> str:
             f'id="{f.slot}" tray_info_idx="{xml_escape(f.tray_info_idx)}"'
             f' type="{xml_escape(f.filament_type)}" color="{xml_escape(f.color)}"'
             f' used_m="{f.used_m:.2f}" used_g="{f.used_g:.2f}"'
+            f' used_for_object="{str(f.used_for_object).lower()}"'
+            f' used_for_support="{str(f.used_for_support).lower()}"'
+            f' group_id="{f.group_id}"'
+            f' nozzle_diameter="{f.nozzle_diameter:.2f}"'
+            f' volume_type="{xml_escape(f.volume_type)}"'
         )
-        if f.extra_attrs:
-            for k, v in f.extra_attrs.items():
-                attrs += f' {xml_escape(k)}="{xml_escape(str(v))}"'
-            lines.append(f"    <filament {attrs}/>")
-        else:
-            lines.append(f"    <filament {attrs} />")
+        lines.append(f"    <filament {attrs}/>")
 
     for w in info.warnings:
         lines.append(
@@ -307,9 +312,12 @@ def _plate_json(info: SliceInfo, filaments: list[FilamentInfo]) -> str:
         data.update(info.plate_data)
 
     # Fill in defaults for keys not already present
+    data.setdefault("bed_type", info.bed_type)
     data.setdefault("filament_colors", [f.color for f in filaments] if filaments else ["#F2754E"])
     data.setdefault("filament_ids", [f.slot - 1 for f in filaments] if filaments else [0])
     data.setdefault("first_extruder", filaments[0].slot - 1 if filaments else 0)
+    if info.first_layer_time is not None:
+        data.setdefault("first_layer_time", info.first_layer_time)
     data.setdefault("is_seq_print", False)
     data.setdefault("nozzle_diameter", info.nozzle_diameter)
     data.setdefault("version", 2)
