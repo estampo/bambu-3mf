@@ -33,7 +33,7 @@ jobs:
 
           # Primary: parse branch name from merge commit message (instant, no API race)
           VERSION=$(echo "$MSG" \
-            | grep -oP 'release/v\K\d+\.\d+\.\d+' \
+            | grep -oP 'release/v\K\d+\.\d+\.\d+(?:(?:a|b|rc)\d+)?' \
             | head -1 || true)
 
           # Fallback: query the commits/pulls API
@@ -43,7 +43,7 @@ jobs:
               --jq '.[].head.ref')
             echo "Associated PR branches: ${BRANCHES:-<none>}"
             VERSION=$(echo "$BRANCHES" \
-              | grep -oP '^release/v\K\d+\.\d+\.\d+$' \
+              | grep -oP '^release/v\K\d+\.\d+\.\d+(?:(?:a|b|rc)\d+)?$' \
               | head -1 || true)
           fi
 
@@ -214,6 +214,10 @@ jobs:
             fi
           else
             ARGS=(gh release create "v${VERSION}" --title "v${VERSION}" --notes-file /tmp/release-body.md)
+            # Mark pre-releases (rc, alpha, beta) appropriately
+            if [[ "$VERSION" =~ (a|b|rc)[0-9]+$ ]]; then
+              ARGS+=(--prerelease)
+            fi
             if [[ -n "$WHEEL" ]]; then
               ARGS+=("$WHEEL")
             fi
