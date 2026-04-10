@@ -1,1 +1,0 @@
-Fix "Compatible Printer" showing repeated X1 Carbon instead of P1S in Bambu Connect by moving machine-level list keys out of per-filament varying keys.

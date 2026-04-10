@@ -1,1 +1,0 @@
-Harden install.sh with partial-execution protection, temp file cleanup, sudo handling, and dependency checks

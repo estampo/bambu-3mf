@@ -5,6 +5,32 @@ This changelog is managed by [towncrier](https://towncrier.readthedocs.io/).
 
 <!-- towncrier release notes start -->
 
+## 0.3.0rc1 — 2026-04-10
+
+### Features
+
+- Add --watch mode, --interval flag, state color mapping, and progress bar to ``bambox status``.
+- Add ``bambox --version`` / ``bambox -V`` flag that reports the installed package version.
+- Add validation checks E013-E014 (multi-filament tool changes), W012-W014 (temperature/matrix ranges), --reference comparison mode (C001-C005), and release-readiness tests.
+- Show AMS filament slot mapping in `bambox print` output so users can verify tray assignments before printing.
+- Wire WasCancelledFn through the Rust bridge so in-flight uploads can be cancelled via the /cancel endpoint
+
+### Bugfixes
+
+- Fix "Compatible Printer" showing repeated X1 Carbon instead of P1S in Bambu Connect by moving machine-level list keys out of per-filament varying keys.
+- Fix CuraEngine bed type mapping (textured_pei_plate → Textured PEI Plate) and sync M73 remaining-time markers with purge-compensated prediction in slice_info.
+- Fix release workflow race condition: detect version from merge commit message instead of relying on GitHub API that may not be indexed yet.
+- Pass --user uid:gid to Docker bridge containers and pull image before each run
+- Populate per-filament usage (used_m/used_g) in slice_info by tracking extrusion per extruder from G-code E positions.
+
+### Misc
+
+- Improve bridge.py test coverage for credentials, AMS parsing, 3MF stripping, and cloud print. ([#80](https://github.com/estampo/bambox/pull/80))
+- Add THIRD-PARTY-NOTICES file with license attribution for bundled CuraEngine definitions and OrcaSlicer/BambuStudio-derived profiles. ([#109](https://github.com/estampo/bambox/pull/109))
+- Harden install.sh with partial-execution protection, temp file cleanup, sudo handling, and dependency checks
+- Support pre-release versions (rc, alpha, beta) in release workflows
+
+
 ## 0.2.2 — 2026-04-09
 
 ### Features

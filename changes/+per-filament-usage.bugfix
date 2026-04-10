@@ -1,1 +1,0 @@
-Populate per-filament usage (used_m/used_g) in slice_info by tracking extrusion per extruder from G-code E positions.

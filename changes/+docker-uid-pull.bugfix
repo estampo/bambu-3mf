@@ -1,1 +1,0 @@
-Pass --user uid:gid to Docker bridge containers and pull image before each run

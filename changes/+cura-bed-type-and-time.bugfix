@@ -1,1 +1,0 @@
-Fix CuraEngine bed type mapping (textured_pei_plate → Textured PEI Plate) and sync M73 remaining-time markers with purge-compensated prediction in slice_info.
