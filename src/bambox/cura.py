@@ -347,24 +347,42 @@ def extract_slice_stats(gcode: str, flush_volume_mm3: float = 280.0) -> SliceSta
         stats.weight = round(total_mm * _FILAMENT_AREA * _PLA_DENSITY_G_PER_MM3, 2)
 
     # CuraEngine CLI often reports "Filament used: 0m" as a placeholder.
-    # Compute from max absolute E position per G92-reset segment instead.
+    # Compute from max absolute E position per G92-reset segment, tracked
+    # per extruder so we can report per-filament usage.
     if stats.weight == 0.0:
         segment_max = 0.0
-        total_length = 0.0
+        per_ext: dict[int, float] = {}  # extruder -> total extrusion mm
+        current_ext = 0
         for line in gcode.splitlines():
             stripped = line.strip()
             if stripped == "G92 E0":
-                total_length += segment_max
+                per_ext[current_ext] = per_ext.get(current_ext, 0.0) + segment_max
                 segment_max = 0.0
+                continue
+            m_t = re.match(r"^T(\d+)$", stripped)
+            if m_t:
+                ext = int(m_t.group(1))
+                if ext < 255:
+                    # Flush the current segment to the current extruder before switching
+                    per_ext[current_ext] = per_ext.get(current_ext, 0.0) + segment_max
+                    segment_max = 0.0
+                    current_ext = ext
                 continue
             m_e = re.match(r"G[01]\s.*E([\d.]+)", stripped)
             if m_e:
                 e_val = float(m_e.group(1))
                 if e_val > segment_max:
                     segment_max = e_val
-        total_length += segment_max  # last segment
+        per_ext[current_ext] = per_ext.get(current_ext, 0.0) + segment_max
+        total_length = sum(per_ext.values())
         if total_length > 0:
             stats.weight = round(total_length * _FILAMENT_AREA * _PLA_DENSITY_G_PER_MM3, 2)
+            # Build per-extruder metres list
+            if per_ext:
+                max_ext = max(per_ext.keys())
+                stats.filament_used_m = [
+                    round(per_ext.get(i, 0.0) / 1000, 2) for i in range(max_ext + 1)
+                ]
 
     # Compensate for firmware-level AMS purge cycles that CuraEngine doesn't
     # know about.  Each T<n> tool change (excluding the initial extruder select
