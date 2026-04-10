@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import subprocess
 from pathlib import Path
 from unittest.mock import patch
@@ -14,8 +13,6 @@ from bambox.bridge import (
     _run_bridge_baked,
     _run_bridge_docker,
 )
-
-_HAS_GETUID = hasattr(os, "getuid")
 
 # -- _run_bridge_docker --------------------------------------------------------
 
@@ -51,7 +48,7 @@ class TestRunBridgeDocker:
             assert cmd[1] == "run"
             assert "--rm" in cmd
             assert "--platform" in cmd
-            assert ("--user" in cmd) == _HAS_GETUID
+            assert "--user" not in cmd
             assert DOCKER_IMAGE in cmd
             assert "status" in cmd
             assert "DEV1" in cmd
@@ -177,11 +174,11 @@ class TestRunBridgeBaked:
             build_cmd = build_call[0][0]
             assert build_cmd[:3] == ["docker", "build", "-t"]
 
-            # Verify docker run was called (with --user on Unix)
+            # Verify docker run was called (without --user — bridge has no host output)
             run_call = mock_run.call_args_list[1]
             run_cmd = run_call[0][0]
             assert run_cmd[0:2] == ["docker", "run"]
-            assert ("--user" in run_cmd) == _HAS_GETUID
+            assert "--user" not in run_cmd
             assert "/input/test.3mf" in run_cmd
 
             # Verify cleanup (docker rmi)
@@ -244,6 +241,4 @@ class TestRunBridgeBaked:
         assert len(dockerfiles_written) == 1
         df = dockerfiles_written[0]
         assert df.startswith(f"FROM {DOCKER_IMAGE}")
-        assert "RUN chmod -R 777 /tmp/bambu_agent /tmp/bambu_plugin" in df
         assert "COPY test.3mf /input/test.3mf" in df
-        assert "RUN chmod 644 /input/test.3mf" in df

@@ -187,8 +187,6 @@ def _run_bridge_docker(
     # Collect local file paths for potential bake fallback
     file_args: dict[str, str] = {}  # host_path -> container_path
     cmd: list[str] = ["docker", "run", "--rm", "--platform", "linux/amd64"]
-    if hasattr(os, "getuid"):
-        cmd.extend(["--user", f"{os.getuid()}:{os.getgid()}"])
     docker_args: list[str] = []
     for arg in args:
         if os.path.exists(arg):
@@ -231,13 +229,10 @@ def _run_bridge_baked(
     try:
         # Write Dockerfile
         lines = [f"FROM {DOCKER_IMAGE}"]
-        # Ensure writable dirs the Bambu Network Library expects
-        lines.append("RUN chmod -R 777 /tmp/bambu_agent /tmp/bambu_plugin")
         for host_path, container_path in file_args.items():
             basename = os.path.basename(host_path)
             shutil.copy2(host_path, tmpdir / basename)
             lines.append(f"COPY {basename} {container_path}")
-            lines.append(f"RUN chmod 644 {container_path}")
         (tmpdir / "Dockerfile").write_text("\n".join(lines) + "\n")
 
         tag = "bambox-bridge-tmp"
@@ -261,8 +256,6 @@ def _run_bridge_baked(
                 docker_args.append(arg)
 
         cmd = ["docker", "run", "--rm", "--platform", "linux/amd64"]
-        if hasattr(os, "getuid"):
-            cmd.extend(["--user", f"{os.getuid()}:{os.getgid()}"])
         cmd.append(tag)
         cmd.extend(docker_args)
         if verbose:
@@ -485,7 +478,7 @@ def query_status(
     """Query live printer status via the bridge."""
     result = _run_bridge(
         ["status", device_id, str(token_file.resolve())],
-        timeout=60,
+        timeout=120,
         verbose=verbose,
     )
     try:

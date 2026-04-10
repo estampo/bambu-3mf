@@ -1,1 +1,1 @@
-Fix baked Docker fallback permissions so bridge runs correctly with --user uid:gid
+Remove ``--user`` from bridge Docker calls (bridge has no host-side output files) and increase status timeout to accommodate baked fallback path
