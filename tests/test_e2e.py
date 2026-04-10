@@ -301,10 +301,17 @@ class TestCliPack:
             ps = json.loads(z.read("Metadata/project_settings.config"))
             # Should have 544+ keys
             assert len(ps) > 500
-            # Arrays padded to 5
+            # Per-filament arrays padded to 5 (skip fixed-length machine lists)
+            _FIXED_LIST_KEYS = {
+                "bed_exclude_area",
+                "print_compatible_printers",
+                "printable_area",
+                "start_end_points",
+                "upward_compatible_machine",
+            }
             for key, val in ps.items():
-                if isinstance(val, list) and len(val) > 0:
-                    assert len(val) >= 5
+                if isinstance(val, list) and len(val) > 0 and key not in _FIXED_LIST_KEYS:
+                    assert len(val) >= 5, f"{key} has {len(val)} elements"
 
     def test_pack_multi_filament(self, tmp_path: Path) -> None:
         gcode_file = tmp_path / "multi.gcode"
@@ -467,10 +474,17 @@ class TestRepack:
             ps = json.loads(z.read("Metadata/project_settings.config"))
             # Regenerated from profiles = 544+ keys
             assert len(ps) > 500
-            # Arrays padded to 5
+            # Per-filament arrays padded to 5 (skip fixed-length machine lists)
+            _FIXED_LIST_KEYS = {
+                "bed_exclude_area",
+                "print_compatible_printers",
+                "printable_area",
+                "start_end_points",
+                "upward_compatible_machine",
+            }
             for key, val in ps.items():
-                if isinstance(val, list) and len(val) > 0:
-                    assert len(val) >= 5
+                if isinstance(val, list) and len(val) > 0 and key not in _FIXED_LIST_KEYS:
+                    assert len(val) >= 5, f"{key} has {len(val)} elements"
 
     def test_fixes_model_settings(self, tmp_path: Path) -> None:
         """Repack pads filament_maps and adds thumbnail refs in model_settings."""
