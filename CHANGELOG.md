@@ -5,6 +5,18 @@ This changelog is managed by [towncrier](https://towncrier.readthedocs.io/).
 
 <!-- towncrier release notes start -->
 
+## 0.3.0 — 2026-04-10
+
+### Bugfixes
+
+- Remove ``--user`` from bridge Docker calls (bridge has no host-side output files) and increase status timeout to accommodate baked fallback path
+- Trigger bridge binary build from release pipeline so native binaries are attached to GitHub Releases
+
+### Misc
+
+- Update README with full CLI documentation for all subcommands
+
+
 ## 0.3.0rc1 — 2026-04-10
 
 ### Features
