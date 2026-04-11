@@ -524,6 +524,7 @@ async fn main() {
 
             let agent_handle = handle::spawn_agent_thread(agent);
             let state = server::AppState::new(agent_handle, printers);
+            server::spawn_cache_updater(state.clone());
             let app = server::router(state);
 
             let addr: SocketAddr = format!("{bind}:{port}")

@@ -1,14 +1,18 @@
 //! axum HTTP server exposing printer status over HTTP.
 //!
+//! A background task drains MQTT messages every ~1s and updates the device
+//! cache. Once a device has been queried via `/status`, its MQTT subscription
+//! stays active and the printer pushes updates every ~1-2s, keeping the cache
+//! perpetually fresh. Subsequent HTTP requests return instantly from cache.
+//!
 //! Endpoints:
 //!   GET  /health            — daemon health + MQTT connection state
 //!   GET  /printers          — list configured printers with cached status summary
 //!   GET  /status/:device_id — cached printer status (instant) or live query
 //!   GET  /ams/:device_id    — AMS tray info extracted from cached status
 //!   POST /cancel/:device_id — cancel current print
-//!   WS   /watch/:device_id  — (Phase 2b, not yet implemented)
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
@@ -45,6 +49,8 @@ pub struct AppState {
     pub handle: AgentHandle,
     /// Cached printer status per device_id.
     pub cache: RwLock<HashMap<String, DeviceStatus>>,
+    /// Devices with active MQTT subscriptions (cache kept fresh by background task).
+    pub subscribed_devices: RwLock<HashSet<String>>,
     /// Configured printers from credentials file.
     pub printers: Vec<PrinterEntry>,
     /// When the daemon started.
@@ -58,6 +64,7 @@ impl AppState {
         Arc::new(Self {
             handle,
             cache: RwLock::new(HashMap::new()),
+            subscribed_devices: RwLock::new(HashSet::new()),
             printers: printers
                 .into_iter()
                 .map(|(name, serial)| PrinterEntry { name, serial })
@@ -146,17 +153,29 @@ async fn get_status(
     State(state): State<SharedState>,
     Path(device_id): Path<String>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorResponse>)> {
-    // Check cache first — return if fresh (< 30s old)
+    // If this device has an active MQTT subscription, the background task keeps
+    // the cache fresh (~1-2s updates from the printer). Return cached if < 10s.
+    let is_subscribed = state
+        .subscribed_devices
+        .read()
+        .unwrap()
+        .contains(&device_id);
+
     {
         let cache = state.cache.read().unwrap();
         if let Some(cached) = cache.get(&device_id) {
-            if cached.updated_at.elapsed() < Duration::from_secs(30) {
+            let max_age = if is_subscribed {
+                Duration::from_secs(10)
+            } else {
+                Duration::from_secs(30)
+            };
+            if cached.updated_at.elapsed() < max_age {
                 return Ok(Json(cached.payload.clone()));
             }
         }
     }
 
-    // Cache miss or stale — do a live query via the agent channel
+    // First request for this device (or stale) — subscribe and get initial status
     state
         .handle
         .drain_messages()
@@ -196,16 +215,20 @@ async fn get_status(
         }
     };
 
-    // Update cache
+    // Update cache and mark as subscribed — background task will keep it fresh
     {
         let mut cache = state.cache.write().unwrap();
         cache.insert(
-            device_id,
+            device_id.clone(),
             DeviceStatus {
                 payload: payload.clone(),
                 updated_at: Instant::now(),
             },
         );
+    }
+    {
+        let mut subs = state.subscribed_devices.write().unwrap();
+        subs.insert(device_id);
     }
 
     Ok(Json(payload))
@@ -520,16 +543,22 @@ async fn get_printer_status_for_ams(
     let best = messages.iter().max_by_key(|m| m.payload.len());
     let result = best.and_then(|msg| serde_json::from_str::<serde_json::Value>(&msg.payload).ok());
 
-    // Cache the result if we got one
+    // Cache the result and mark as subscribed
     if let Some(ref payload) = result {
-        let mut cache = state.cache.write().unwrap();
-        cache.insert(
-            device_id_owned,
-            DeviceStatus {
-                payload: payload.clone(),
-                updated_at: Instant::now(),
-            },
-        );
+        {
+            let mut cache = state.cache.write().unwrap();
+            cache.insert(
+                device_id_owned.clone(),
+                DeviceStatus {
+                    payload: payload.clone(),
+                    updated_at: Instant::now(),
+                },
+            );
+        }
+        {
+            let mut subs = state.subscribed_devices.write().unwrap();
+            subs.insert(device_id_owned);
+        }
     }
 
     result
@@ -537,6 +566,73 @@ async fn get_printer_status_for_ams(
 
 fn err(status: StatusCode, msg: String) -> (StatusCode, Json<ErrorResponse>) {
     (status, Json(ErrorResponse { error: msg }))
+}
+
+// ---------------------------------------------------------------------------
+// Background cache updater
+// ---------------------------------------------------------------------------
+
+/// Spawn a background task that drains MQTT messages every second and updates
+/// the device cache. Once a device has been subscribed (via `get_status`), the
+/// printer pushes status updates every ~1-2s over MQTT. This task picks them
+/// up and keeps the cache perpetually fresh so HTTP requests are always instant.
+pub fn spawn_cache_updater(state: SharedState) {
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+
+            // Only drain if there are subscribed devices
+            let has_subs = !state.subscribed_devices.read().unwrap().is_empty();
+            if !has_subs {
+                continue;
+            }
+
+            let messages = match state.handle.drain_messages().await {
+                Ok(msgs) => msgs,
+                Err(_) => continue,
+            };
+
+            if messages.is_empty() {
+                continue;
+            }
+
+            // Group messages by device_id, keep the best (largest) per device
+            let mut best_per_device: HashMap<String, &crate::callbacks::MqttMessage> =
+                HashMap::new();
+            for msg in &messages {
+                if msg.dev_id.is_empty() {
+                    continue;
+                }
+                let entry = best_per_device.entry(msg.dev_id.clone()).or_insert(msg);
+                if msg.payload.len() > entry.payload.len() {
+                    *entry = msg;
+                }
+            }
+
+            // Update cache for each device that sent messages
+            let mut cache = state.cache.write().unwrap();
+            for (dev_id, msg) in best_per_device {
+                // Only cache messages that look like full status (have gcode_state)
+                if msg.payload.len() < 100 || !msg.payload.contains("gcode_state") {
+                    continue;
+                }
+                if let Ok(payload) = serde_json::from_str::<serde_json::Value>(&msg.payload) {
+                    tracing::trace!(
+                        device_id = %dev_id,
+                        payload_len = msg.payload.len(),
+                        "cache updated by background task"
+                    );
+                    cache.insert(
+                        dev_id,
+                        DeviceStatus {
+                            payload,
+                            updated_at: Instant::now(),
+                        },
+                    );
+                }
+            }
+        }
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -571,6 +667,7 @@ pub fn mock_state_with_printers(
                 })
                 .collect(),
         ),
+        subscribed_devices: RwLock::new(HashSet::new()),
         printers: printers
             .into_iter()
             .map(|(name, serial)| PrinterEntry { name, serial })
