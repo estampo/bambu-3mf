@@ -448,12 +448,18 @@ def _check_multi_filament(gcode: str, findings: list[Finding]) -> None:
         )
 
     # E014: bare T commands outside M620/M621 blocks
-    # Walk lines tracking whether we are inside an M620/M621 block
+    # Walk lines tracking whether we are inside an M620/M621 block.
+    # The first bare T command before any extrusion (G1 … E) is an initial
+    # extruder select left by rewrite_tool_changes — harmless, skip it.
+    _RE_EXTRUSION = re.compile(r"^G1\s.*E[\d.]")
     in_block = False
+    seen_extrusion = False
     for line in gcode.splitlines():
         stripped = line.strip()
         if stripped.startswith(";"):
             continue
+        if not seen_extrusion and _RE_EXTRUSION.match(stripped):
+            seen_extrusion = True
         if _RE_M620_S.match(stripped):
             in_block = True
             continue
@@ -461,6 +467,8 @@ def _check_multi_filament(gcode: str, findings: list[Finding]) -> None:
             in_block = False
             continue
         if not in_block and _RE_BARE_TOOL.match(stripped):
+            if not seen_extrusion:
+                continue  # initial extruder select, not a real tool change
             findings.append(
                 Finding(
                     Severity.ERROR,
@@ -618,6 +626,8 @@ def _check_project_settings(raw: str, findings: list[Finding]) -> None:
                 temp = int(v) if isinstance(v, str) else int(v)
             except (ValueError, TypeError):
                 continue
+            if temp == -1:
+                continue  # BBL firmware sentinel for "disabled"
             if temp < 0 or temp > 120:
                 findings.append(
                     Finding(

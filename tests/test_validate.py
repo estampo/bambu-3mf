@@ -763,6 +763,39 @@ G1 X20 Y20 E2 F600
         result = validate_3mf(path)
         assert any(f.code == "E014" for f in result.errors)
 
+    def test_initial_extruder_select_ok(self, tmp_path: Path) -> None:
+        """Bare T0 before any extrusion is an initial select, not an error."""
+        gcode = """\
+; HEADER_BLOCK_START
+; total layer number: 2
+; HEADER_BLOCK_END
+M73 P0 R5
+T0
+M620 S0
+T0
+M621 S0
+;LAYER_CHANGE
+;Z:0.2
+;HEIGHT:0.2
+M73 L1
+M991 S0 P1
+M73 P50 R3
+G1 X10 Y10 E1 F600
+M620 S1
+T1
+M621 S1
+;LAYER_CHANGE
+;Z:0.4
+;HEIGHT:0.2
+M73 L2
+M991 S0 P2
+M73 P100 R0
+G1 X20 Y20 E2 F600
+"""
+        path = _build_valid_3mf(tmp_path, gcode=gcode)
+        result = validate_3mf(path)
+        assert not any(f.code == "E014" for f in result.findings)
+
     def test_t_inside_block_ok(self, tmp_path: Path) -> None:
         """T commands inside M620/M621 blocks should not trigger E014."""
         path = _build_valid_3mf(tmp_path, gcode=_MULTI_FILAMENT_GCODE)
@@ -818,6 +851,23 @@ class TestBedTempRange:
         path = _build_valid_3mf(tmp_path, settings=settings)
         result = validate_3mf(path)
         assert any(f.code == "W013" for f in result.warnings)
+
+    def test_disabled_sentinel_minus_one_ok(self, tmp_path: Path) -> None:
+        """BBL firmware uses -1 to mean 'disabled' — not an out-of-range temp."""
+        settings = json.dumps(
+            {
+                "filament_type": ["PLA"] * 5,
+                "filament_colour": ["#F2754E"] * 5,
+                "nozzle_temperature": ["220"] * 5,
+                "nozzle_temperature_initial_layer": ["220"] * 5,
+                "bed_temperature": ["60"] * 5,
+                "filament_max_volumetric_speed": ["12"] * 5,
+                "filament_tower_interface_print_temp": ["-1"] * 5,
+            }
+        )
+        path = _build_valid_3mf(tmp_path, settings=settings)
+        result = validate_3mf(path)
+        assert not any(f.code == "W013" for f in result.findings)
 
     def test_valid_bed_temp_passes(self, tmp_path: Path) -> None:
         path = _build_valid_3mf(tmp_path)
