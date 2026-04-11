@@ -23,19 +23,23 @@ use clap::{Parser, Subcommand};
 use agent::{BambuAgent, Credentials};
 
 /// Candidate credentials paths, checked in order.
+/// Prefers bambox paths over estampo (legacy) to match the Python side.
 /// On macOS dirs::config_dir() returns ~/Library/Application Support/
-/// but estampo uses ~/.config/ (XDG style), so we check both.
+/// but bambox/estampo use ~/.config/ (XDG style), so we check both.
 fn credentials_search_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
-    // Always check XDG-style ~/.config first (cross-platform, estampo default)
     if let Some(home) = dirs::home_dir() {
+        // Prefer bambox paths (current), then estampo (legacy fallback)
+        paths.push(home.join(".config").join("bambox").join("credentials.toml"));
         paths.push(home.join(".config").join("estampo").join("credentials.toml"));
     }
     // Also check platform config dir (~/Library/Application Support/ on macOS)
     if let Some(config) = dirs::config_dir() {
-        let platform_path = config.join("estampo").join("credentials.toml");
-        if !paths.contains(&platform_path) {
-            paths.push(platform_path);
+        for app in &["bambox", "estampo"] {
+            let platform_path = config.join(app).join("credentials.toml");
+            if !paths.contains(&platform_path) {
+                paths.push(platform_path);
+            }
         }
     }
     paths
