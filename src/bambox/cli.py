@@ -930,6 +930,54 @@ def print_cmd(
 
 
 @app.command()
+def cancel(
+    device: Annotated[str, typer.Option("-d", "--device", help="Printer serial number")] = "",
+    printer: Annotated[
+        Optional[str], typer.Option("-p", "--printer", help="Named printer from credentials.toml")
+    ] = None,
+    credentials: Annotated[
+        Optional[Path], typer.Option("-c", "--credentials", help="Path to credentials.toml")
+    ] = None,
+) -> None:
+    """Cancel the current print on a Bambu printer."""
+    _warn_experimental()
+    from bambox.bridge import cancel_print, load_credentials
+
+    creds_path = credentials
+    try:
+        creds = load_credentials(creds_path)
+    except (FileNotFoundError, ValueError) as e:
+        ui.error(str(e))
+        sys.exit(1)
+
+    serial = device
+    if not serial:
+        if printer:
+            serial, name = _resolve_printer(printer, creds_path)
+        else:
+            serial, name = _resolve_printer(None, creds_path)
+
+    if not serial:
+        ui.error("No printer specified. Use --device or --printer.")
+        sys.exit(1)
+
+    if not ui.prompt_yn("Cancel the current print?", default=False):
+        ui.info("Cancelled.")
+        return
+
+    try:
+        result = cancel_print(serial, credentials=creds, verbose=_verbose)
+        resp = result.get("result", "unknown")
+        if resp in ("success", "ok"):
+            ui.success("Print cancelled.")
+        else:
+            ui.console.print(f"Bridge response: {json.dumps(result, indent=2)}", markup=False)
+    except Exception as e:
+        ui.error(str(e))
+        sys.exit(1)
+
+
+@app.command()
 def status(
     device: Annotated[str, typer.Argument(help="Printer serial number")] = "",
     printer: Annotated[

@@ -502,6 +502,56 @@ class TestCmdPrint:
 
 
 # ---------------------------------------------------------------------------
+# cancel via main()
+# ---------------------------------------------------------------------------
+
+
+class TestCmdCancel:
+    def test_cancel_bad_credentials(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        with patch("bambox.bridge.load_credentials", side_effect=FileNotFoundError("no creds")):
+            with pytest.raises(SystemExit, match="1"):
+                main(["cancel", "-d", "SERIAL"])
+        assert "no creds" in capsys.readouterr().err
+
+    def test_cancel_success(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+        creds = {"token": "tok"}
+        with (
+            patch("bambox.bridge.load_credentials", return_value=creds),
+            patch("bambox.bridge.cancel_print", return_value={"result": "success"}) as mock_cp,
+            patch("bambox.cli.ui.prompt_yn", return_value=True),
+        ):
+            main(["cancel", "-d", "SERIAL123"])
+            assert mock_cp.call_args[0][0] == "SERIAL123"
+        assert "cancelled" in capsys.readouterr().out.lower()
+
+    def test_cancel_aborted_by_user(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        creds = {"token": "tok"}
+        with (
+            patch("bambox.bridge.load_credentials", return_value=creds),
+            patch("bambox.bridge.cancel_print") as mock_cp,
+            patch("bambox.cli.ui.prompt_yn", return_value=False),
+        ):
+            main(["cancel", "-d", "SERIAL123"])
+            mock_cp.assert_not_called()
+
+    def test_cancel_by_printer_name(self, tmp_path: Path) -> None:
+        creds_file = tmp_path / "credentials.toml"
+        creds_file.write_text('[cloud]\ntoken = "tok"\n[printers.myprinter]\nserial = "ABC123"\n')
+        creds = {"token": "tok"}
+        with (
+            patch("bambox.bridge.load_credentials", return_value=creds),
+            patch("bambox.bridge.cancel_print", return_value={"result": "ok"}) as mock_cp,
+            patch("bambox.cli.ui.prompt_yn", return_value=True),
+        ):
+            main(["cancel", "-p", "myprinter", "-c", str(creds_file)])
+            assert mock_cp.call_args[0][0] == "ABC123"
+
+
+# ---------------------------------------------------------------------------
 # _cmd_status via main()
 # ---------------------------------------------------------------------------
 

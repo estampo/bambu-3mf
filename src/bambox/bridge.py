@@ -491,6 +491,44 @@ def query_status(
         )
 
 
+def cancel_print(
+    device_id: str,
+    credentials: dict[str, str] | None = None,
+    credentials_path: Path | None = None,
+    *,
+    verbose: bool = False,
+) -> dict:
+    """Cancel the current print on a Bambu printer via cloud bridge.
+
+    Either *credentials* (dict) or *credentials_path* (TOML file) must be given.
+
+    Returns the bridge response dict.
+    """
+    if credentials is None:
+        credentials = load_credentials(credentials_path)
+
+    token_file = _write_token_json(credentials)
+    try:
+        result = _run_bridge(
+            ["cancel", device_id, str(token_file.resolve())],
+            timeout=120,
+            verbose=verbose,
+        )
+    finally:
+        try:
+            token_file.unlink()
+        except OSError:
+            pass
+
+    try:
+        return json.loads(result.stdout.strip())
+    except json.JSONDecodeError:
+        raise RuntimeError(
+            f"Bridge returned non-JSON (exit {result.returncode}): "
+            f"{result.stdout[:200]} | {result.stderr[:200]}"
+        )
+
+
 def cloud_print(
     threemf_path: Path,
     device_id: str,
