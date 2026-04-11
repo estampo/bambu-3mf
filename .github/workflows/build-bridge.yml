@@ -51,6 +51,7 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v6
       - uses: actions/download-artifact@v4
         with:
           path: dist
@@ -67,3 +68,5 @@ jobs:
             mv "/tmp/$name" "dist/$name"
             gh release upload "$TAG" "dist/$name" --repo "${{ github.repository }}" --clobber
           done
+          # Upload install script
+          gh release upload "$TAG" install.sh --repo "${{ github.repository }}" --clobber
