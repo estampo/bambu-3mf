@@ -134,6 +134,36 @@ def _run_bridge(
     return _run_bridge_docker(args, timeout=timeout, verbose=verbose)
 
 
+def _translate_args_for_rust_bridge(args: list[str]) -> list[str]:
+    """Translate C++ bridge positional args to Rust bridge CLI shape.
+
+    The C++ bridge uses positional token files:
+      status <device_id> <token_file>
+      cancel <device_id> <token_file>
+      print <3mf> <device_id> <token_file> [--flags...]
+
+    The Rust bridge uses ``-c <token_file>`` as a global flag:
+      -c <token_file> status <device_id>
+      -c <token_file> cancel <device_id>
+      -c <token_file> print <3mf> <device_id> [--flags...]
+    """
+    if not args:
+        return args
+
+    subcmd = args[0]
+    if subcmd in ("status", "cancel") and len(args) >= 3:
+        # args: [subcmd, device_id, token_file]
+        token_file = args[2]
+        return ["-c", token_file, subcmd, args[1]] + args[3:]
+    elif subcmd == "print" and len(args) >= 4:
+        # args: [print, 3mf_path, device_id, token_file, --flags...]
+        token_file = args[3]
+        return ["-c", token_file, "print", args[1], args[2]] + args[4:]
+    else:
+        # Unknown shape — pass through unchanged
+        return args
+
+
 def _run_bridge_local(
     binary: str,
     args: list[str],
@@ -141,11 +171,16 @@ def _run_bridge_local(
     timeout: int = 300,
     verbose: bool = False,
 ) -> subprocess.CompletedProcess[str]:
-    """Run the bridge via a local binary."""
+    """Run the bridge via a local binary.
+
+    Translates the C++-style positional arguments to the Rust bridge's
+    ``-c/--credentials`` flag format automatically.
+    """
+    translated = _translate_args_for_rust_bridge(args)
     cmd = [binary]
     if verbose:
         cmd.append("-v")
-    cmd.extend(args)
+    cmd.extend(translated)
     log.debug("Running (local): %s", " ".join(cmd))
     return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
 

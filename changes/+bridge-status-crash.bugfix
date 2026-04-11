@@ -1,0 +1,1 @@
+Fix ``bambox status`` crash when local Rust bridge is installed by translating C++ positional args to Rust ``-c/--credentials`` flag format.
