@@ -37,7 +37,7 @@ Each module has a defined scope. Do not add logic to the wrong module — even i
 |--------|------|-----------------|
 | `pack.py` | Core .gcode.3mf archive construction, XML metadata, MD5 checksums, Bambu Connect fixup | Settings generation, slicer logic, printer communication |
 | `settings.py` | 544-key project_settings builder, profile loading, filament overlay, array broadcasting | G-code generation, archive packing, printer logic |
-| `bridge.py` | Cloud printing via the bridge (Rust `bambox-bridge` local binary or Docker image), credential loading, AMS tray mapping, printer status. **Currently straddles legacy C++ `estampo/cloud-bridge` image and the new Rust `bambox-bridge` — see ADR-002. Do not add logic that entrenches the C++ path.** | Archive construction, settings generation, slicer invocation |
+| `bridge.py` | Cloud printing via the Rust `bambox-bridge` (local binary or Docker image), credential loading, AMS tray mapping, printer status | Archive construction, settings generation, slicer invocation |
 | `cli.py` | Typer commands (pack, print, status), argument parsing, user-facing output | Business logic — delegate to pack/bridge/settings |
 | `cura.py` | CuraEngine Docker invocation, profile conversion, start/end G-code injection | OrcaSlicer logic, archive packing, printer communication |
 | `templates.py` | OrcaSlicer→Jinja2 syntax conversion, template rendering | G-code generation, settings logic |
@@ -56,22 +56,15 @@ Bambu printers require a `project_settings.config` with ~544 keys in the .gcode.
 
 Do NOT modify `fixup_project_settings()` without understanding the array padding and key fixup logic — it ensures Bambu Connect firmware acceptance.
 
-### Bridge Architecture (migration in progress — see ADR-002)
+### Bridge Architecture
 
-Cloud printing goes through a "bridge" binary that wraps `libbambu_networking.so`. There are **two bridges in the tree** and the codebase is mid-migration between them:
+Cloud printing goes through the Rust `bambox-bridge` binary that wraps `libbambu_networking.so` via FFI. Source lives in `bridge/`, Docker image is `estampo/bambox-bridge` built from `bridge/Dockerfile`.
 
-1. **Rust `bambox-bridge`** (target) — source in `bridge/`, Docker image `bambox/bridge` built from `bridge/Dockerfile`. Implements `status`, `watch`, `daemon` subcommands; credentials via global `-c/--credentials` flag. `_find_local_bridge()` picks it up when installed locally.
-2. **Legacy C++ `estampo/cloud-bridge:bambu-*`** (deprecated) — still referenced in `bridge.py` as the Docker fallback. Positional `status <device> <token>` / `print` / `cancel` CLI. Will be removed once the Rust bridge reaches parity.
+The bridge implements `status`, `print`, `cancel`, `watch`, and `daemon` subcommands. Credentials are passed via the global `-c/--credentials` flag. `_find_local_bridge()` in `bridge.py` picks it up when installed locally; Docker bind-mount mode is used as a fallback.
 
-The two bridges are **not CLI-compatible**. Do not assume args that work against one will work against the other. When touching `bridge.py`, route subcommands explicitly based on which bridge is being invoked.
+The Python side (`bridge.py`) still builds args in the legacy C++ positional format internally, then `_translate_args_for_rust_bridge()` converts them to the Rust `-c` flag format before execution. This translation layer exists in both the local and Docker code paths.
 
-Docker invocation currently supports two modes for the legacy image:
-1. **Bind-mount** (primary) — mounts .gcode.3mf via `-v`
-2. **Baked fallback** — for sandboxed/DinD environments, builds temp image with COPY
-
-Both fallback modes exist because of the C++ bridge. The Rust bridge's HTTP daemon API is designed to eliminate them — do not extend these code paths; drive the migration forward instead.
-
-**Full migration plan:** `docs/bridge-migration-plan.md`. **Decision record:** `docs/decisions/002-rust-bridge-replaces-cpp.md`.
+**Decision record:** `docs/decisions/002-rust-bridge-replaces-cpp.md`.
 
 ### Bambu Connect Compatibility
 The archive format is validated by printer firmware. Key constraints:

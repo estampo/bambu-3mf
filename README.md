@@ -86,7 +86,7 @@ This installs `bambox-bridge` to `~/.local/bin`.
 **Option B — Docker (Linux, macOS, Windows):**
 
 If you have Docker installed and running, bambox uses the
-`estampo/cloud-bridge` image automatically — no extra setup needed.
+`estampo/bambox-bridge` image automatically — no extra setup needed.
 This is the only option on Windows.
 
 ### Platform Support

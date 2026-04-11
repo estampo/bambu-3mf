@@ -1,0 +1,1 @@
+Remove all legacy C++ ``estampo/cloud-bridge`` references — Docker fallback now uses the Rust ``bambox-bridge`` image with arg translation, and the baked-image fallback has been removed.

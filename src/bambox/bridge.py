@@ -1,7 +1,7 @@
 """Cloud printing via the Bambu cloud bridge.
 
 Wraps the ``bambox-bridge`` binary (preferred) or falls back to the
-``estampo/cloud-bridge`` Docker container for sending prints, querying status,
+``estampo/bambox-bridge`` Docker image for sending prints, querying status,
 and managing AMS tray mapping.  No dependency on the estampo package — this
 module is self-contained for standalone bambox usage.
 """
@@ -31,7 +31,7 @@ def _xml_ns(root: ET.Element) -> str:
     return ""
 
 
-DOCKER_IMAGE = "estampo/cloud-bridge:bambu-02.05.00.00"
+DOCKER_IMAGE = "estampo/bambox-bridge:bambu-02.05.00.00"
 
 # ---------------------------------------------------------------------------
 # Credentials
@@ -124,7 +124,6 @@ def _run_bridge(
 
     1. Local ``bambox-bridge`` binary (no Docker overhead)
     2. Docker bind-mount mode
-    3. Docker baked-image fallback (for sandboxed environments)
     """
     local = _find_local_bridge()
     if local:
@@ -191,12 +190,11 @@ def _run_bridge_docker(
     timeout: int = 300,
     verbose: bool = False,
 ) -> subprocess.CompletedProcess[str]:
-    """Run the cloud bridge via Docker.
+    """Run the cloud bridge via Docker with bind-mount mode.
 
-    First tries bind-mount mode (``-v host:container``). If that fails because
-    the container cannot read the mounted file (common in sandboxed environments
-    where overlay filesystems break bind mounts), falls back to building a
-    temporary Docker image that ``COPY``s the input files.
+    Translates the C++-style positional arguments to the Rust bridge's
+    ``-c/--credentials`` flag format automatically, then volume-mounts
+    any local file paths into the container.
     """
     install_hint = (
         "Install the bridge: curl -fsSL "
@@ -219,18 +217,18 @@ def _run_bridge_docker(
         timeout=120,
     )
 
-    # Collect local file paths for potential bake fallback
-    file_args: dict[str, str] = {}  # host_path -> container_path
+    # Translate C++ positional args to Rust -c flag format
+    translated = _translate_args_for_rust_bridge(args)
+
     cmd: list[str] = ["docker", "run", "--rm", "--platform", "linux/amd64"]
     docker_args: list[str] = []
-    for arg in args:
+    for arg in translated:
         if os.path.exists(arg):
             real = os.path.realpath(arg)
             basename = os.path.basename(real)
             container_path = f"/input/{basename}"
             cmd.extend(["-v", f"{real}:{container_path}:ro"])
             docker_args.append(container_path)
-            file_args[real] = container_path
         else:
             docker_args.append(arg)
 
@@ -239,69 +237,8 @@ def _run_bridge_docker(
     if verbose:
         cmd.append("-v")
 
-    log.debug("Running (bind-mount): %s", " ".join(cmd))
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-
-    # Detect bind-mount failure (file appears as dir or unreadable in container)
-    if result.returncode != 0 and file_args and "cannot read" in result.stderr:
-        log.info("Bind-mount failed, falling back to baked Docker image")
-        return _run_bridge_baked(args, file_args, timeout=timeout, verbose=verbose)
-
-    return result
-
-
-def _run_bridge_baked(
-    args: list[str],
-    file_args: dict[str, str],
-    *,
-    timeout: int = 300,
-    verbose: bool = False,
-) -> subprocess.CompletedProcess[str]:
-    """Fallback: build a temp image with COPY instead of bind mounts."""
-    import shutil
-
-    tmpdir = Path(tempfile.mkdtemp(prefix="bambu_bridge_"))
-    try:
-        # Write Dockerfile
-        lines = [f"FROM {DOCKER_IMAGE}"]
-        for host_path, container_path in file_args.items():
-            basename = os.path.basename(host_path)
-            shutil.copy2(host_path, tmpdir / basename)
-            lines.append(f"COPY {basename} {container_path}")
-        (tmpdir / "Dockerfile").write_text("\n".join(lines) + "\n")
-
-        tag = "bambox-bridge-tmp"
-        build = subprocess.run(
-            ["docker", "build", "-t", tag, "."],
-            capture_output=True,
-            text=True,
-            cwd=str(tmpdir),
-            timeout=60,
-        )
-        if build.returncode != 0:
-            raise RuntimeError(f"Docker build failed: {build.stderr[:500]}")
-
-        # Re-build args with container paths
-        docker_args: list[str] = []
-        for arg in args:
-            real = os.path.realpath(arg) if os.path.exists(arg) else ""
-            if real in file_args:
-                docker_args.append(file_args[real])
-            else:
-                docker_args.append(arg)
-
-        cmd = ["docker", "run", "--rm", "--platform", "linux/amd64"]
-        cmd.append(tag)
-        cmd.extend(docker_args)
-        if verbose:
-            cmd.append("-v")
-
-        log.debug("Running (baked): %s", " ".join(cmd))
-        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-    finally:
-        shutil.rmtree(tmpdir, ignore_errors=True)
-        # Clean up temp image (best-effort)
-        subprocess.run(["docker", "rmi", tag], capture_output=True, timeout=10)
+    log.debug("Running (docker): %s", " ".join(cmd))
+    return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
 
 
 # ---------------------------------------------------------------------------
