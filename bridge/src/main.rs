@@ -46,7 +46,7 @@ fn credentials_search_paths() -> Vec<PathBuf> {
 }
 
 #[derive(Parser)]
-#[command(name = "bambox-bridge", about = "Bambu Lab printer bridge")]
+#[command(name = "bambox-bridge", about = "Bambu Lab printer bridge", version)]
 struct Cli {
     #[command(subcommand)]
     command: Command,

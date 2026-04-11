@@ -1,1 +1,0 @@
-Improve ``bambox status -w``: update display in-place instead of clearing screen, and show timestamp of last update.
