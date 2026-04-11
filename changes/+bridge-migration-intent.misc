@@ -1,1 +1,0 @@
-Document Rust `bambox-bridge` as the replacement for the legacy C++ `estampo/cloud-bridge`: restore the bridge migration plan, add ADR-002, and update CLAUDE.md.

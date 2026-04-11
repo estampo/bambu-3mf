@@ -5,6 +5,27 @@ This changelog is managed by [towncrier](https://towncrier.readthedocs.io/).
 
 <!-- towncrier release notes start -->
 
+## 0.4.0 — 2026-04-11
+
+### Features
+
+- Add ``print`` and ``cancel`` CLI subcommands to the Rust bridge, reaching CLI parity with the legacy C++ bridge.
+- ``bambox status -w`` now auto-starts the Rust daemon for fast polling via HTTP instead of spawning a new bridge process per refresh. The daemon keeps MQTT subscriptions alive and updates its cache every ~1s from printer push messages, so subsequent queries are always instant.
+
+### Bugfixes
+
+- Fix credentials file briefly world-readable before chmod — now created with 0o600 from the start using ``os.open()``/``mkstemp``, and parent directories use 0o700. ([#139](https://github.com/estampo/bambox/pull/139))
+- Fix ``bambox status`` crash when local Rust bridge is installed by translating C++ positional args to Rust ``-c/--credentials`` flag format.
+
+### Misc
+
+- Add ``install-dev.sh`` script for installing the bridge binary from the latest CI build on main.
+- Document Rust `bambox-bridge` as the replacement for the legacy C++ `estampo/cloud-bridge`: restore the bridge migration plan, add ADR-002, and update CLAUDE.md.
+- Improve ``bambox status -w``: update display in-place instead of clearing screen, and show timestamp of last update.
+- Remove all legacy C++ ``estampo/cloud-bridge`` references — Docker fallback now uses the Rust ``bambox-bridge`` image with arg translation, and the baked-image fallback has been removed.
+- Shrink bridge Docker image from 174MB to 60MB using distroless base and multi-stage fetch.
+
+
 ## 0.3.5 — 2026-04-11
 
 ### Features

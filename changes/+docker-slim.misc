@@ -1,1 +1,0 @@
-Shrink bridge Docker image from 174MB to 60MB using distroless base and multi-stage fetch.

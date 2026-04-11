@@ -1,1 +1,0 @@
-Fix credentials file briefly world-readable before chmod — now created with 0o600 from the start using ``os.open()``/``mkstemp``, and parent directories use 0o700.
