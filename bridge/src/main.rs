@@ -83,6 +83,33 @@ enum Command {
         /// Bambu device ID (omit to show all printers)
         device_id: Option<String>,
     },
+    /// Send a .gcode.3mf to a Bambu printer via cloud
+    Print {
+        /// Path to the .gcode.3mf file
+        threemf_path: String,
+        /// Bambu device ID
+        device_id: String,
+        /// Project name shown on printer display
+        #[arg(long, default_value = "bambox")]
+        project: String,
+        /// Upload timeout in seconds
+        #[arg(long, default_value = "180")]
+        timeout: u64,
+        /// AMS mapping JSON array (e.g. [0,1,2,3])
+        #[arg(long)]
+        ams_mapping: Option<String>,
+        /// AMS mapping2 JSON array (e.g. [{"ams_id":0,"slot_id":0}])
+        #[arg(long)]
+        ams_mapping2: Option<String>,
+        /// Path to config-only 3MF (metadata without gcode)
+        #[arg(long)]
+        config_3mf: Option<String>,
+    },
+    /// Cancel the current print on a Bambu printer
+    Cancel {
+        /// Bambu device ID
+        device_id: String,
+    },
     /// Long-lived mode: login once, accept commands on stdin
     Watch {
         /// Bambu device ID
@@ -394,6 +421,89 @@ async fn main() {
                 println!("{}", serde_json::to_string(&results).unwrap());
             }
             fast_exit(0);
+        }
+        Command::Print {
+            threemf_path,
+            device_id,
+            project,
+            timeout: _timeout,
+            ams_mapping,
+            ams_mapping2,
+            config_3mf,
+        } => {
+            // Validate the 3MF file exists
+            let threemf = std::path::Path::new(&threemf_path);
+            if !threemf.is_file() {
+                eprintln!("error: file not found: {threemf_path}");
+                process::exit(1);
+            }
+
+            suppress_stdout();
+            let creds = load_credentials(&creds_path);
+            let agent = init_agent(&lib_path, &creds);
+
+            let request = agent::PrintRequest {
+                device_id: device_id.clone(),
+                filename: threemf_path.clone(),
+                project_name: project.clone(),
+                config_filename: config_3mf.clone(),
+                ams_mapping: ams_mapping.clone(),
+                ams_mapping2: ams_mapping2.clone(),
+                bed_leveling: true,
+                flow_cali: true,
+                vibration_cali: true,
+                timelapse: false,
+                use_ams: true,
+            };
+
+            let result = match agent.start_print(&request) {
+                Ok(r) => r,
+                Err(e) => {
+                    restore_stdout();
+                    let err = serde_json::json!({"result": "error", "error": e});
+                    println!("{}", serde_json::to_string(&err).unwrap());
+                    fast_exit(1);
+                }
+            };
+
+            restore_stdout();
+            println!("{}", serde_json::to_string(&result).unwrap());
+            fast_exit(if result.return_code == 0 || result.return_code == -1 { 0 } else { 1 });
+        }
+        Command::Cancel { device_id } => {
+            suppress_stdout();
+            let creds = load_credentials(&creds_path);
+            let agent = init_agent(&lib_path, &creds);
+
+            // Subscribe to the device so we can send the stop command
+            if let Err(e) = agent.subscribe_and_pushall(&device_id, Duration::from_secs(10)) {
+                restore_stdout();
+                let err = serde_json::json!({"result": "error", "error": e});
+                println!("{}", serde_json::to_string(&err).unwrap());
+                fast_exit(1);
+            }
+
+            // Send the MQTT stop command
+            let stop_cmd = r#"{"print":{"command":"stop","sequence_id":"0"}}"#;
+            let ret = match agent.send_message(&device_id, stop_cmd) {
+                Ok(r) => r,
+                Err(e) => {
+                    restore_stdout();
+                    let err = serde_json::json!({"result": "error", "error": e});
+                    println!("{}", serde_json::to_string(&err).unwrap());
+                    fast_exit(1);
+                }
+            };
+
+            restore_stdout();
+            let result = serde_json::json!({
+                "command": "stop",
+                "device_id": device_id,
+                "result": if ret == 0 { "success" } else { "error" },
+                "send_result": ret,
+            });
+            println!("{}", serde_json::to_string(&result).unwrap());
+            fast_exit(if ret == 0 { 0 } else { 1 });
         }
         Command::Watch { device_id } => {
             suppress_stdout();

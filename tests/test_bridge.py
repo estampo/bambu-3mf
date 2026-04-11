@@ -19,6 +19,7 @@ from bambox.bridge import (
     _patch_config_3mf_colors,
     _run_bridge_local,
     _strip_gcode_from_3mf,
+    _translate_args_for_rust_bridge,
     _write_token_json,
     load_credentials,
     parse_ams_trays,
@@ -57,22 +58,99 @@ class TestFindLocalBridge:
             assert _find_local_bridge() is None
 
 
-class TestRunBridgeLocal:
-    def test_builds_command_without_verbose(self):
-        """Args are passed through, no -v flag."""
-        with patch("bambox.bridge.subprocess.run") as mock_run:
-            mock_run.return_value = subprocess.CompletedProcess([], 0, "", "")
-            _run_bridge_local("/usr/local/bin/bambox-bridge", ["status", "DEV1"])
-            cmd = mock_run.call_args[0][0]
-            assert cmd == ["/usr/local/bin/bambox-bridge", "status", "DEV1"]
+class TestTranslateArgsForRustBridge:
+    """Verify C++ → Rust CLI arg translation."""
 
-    def test_verbose_flag_before_args(self):
-        """-v must appear before positional args."""
+    def test_status_args(self):
+        result = _translate_args_for_rust_bridge(["status", "DEV1", "/tmp/token.json"])
+        assert result == ["-c", "/tmp/token.json", "status", "DEV1"]
+
+    def test_cancel_args(self):
+        result = _translate_args_for_rust_bridge(["cancel", "DEV1", "/tmp/token.json"])
+        assert result == ["-c", "/tmp/token.json", "cancel", "DEV1"]
+
+    def test_print_args_basic(self):
+        result = _translate_args_for_rust_bridge(
+            ["print", "/tmp/test.3mf", "DEV1", "/tmp/token.json"]
+        )
+        assert result == ["-c", "/tmp/token.json", "print", "/tmp/test.3mf", "DEV1"]
+
+    def test_print_args_with_flags(self):
+        result = _translate_args_for_rust_bridge(
+            [
+                "print",
+                "/tmp/test.3mf",
+                "DEV1",
+                "/tmp/token.json",
+                "--project",
+                "bambox",
+                "--timeout",
+                "120",
+                "--ams-mapping",
+                "[0,1]",
+            ]
+        )
+        assert result == [
+            "-c",
+            "/tmp/token.json",
+            "print",
+            "/tmp/test.3mf",
+            "DEV1",
+            "--project",
+            "bambox",
+            "--timeout",
+            "120",
+            "--ams-mapping",
+            "[0,1]",
+        ]
+
+    def test_empty_args_passthrough(self):
+        assert _translate_args_for_rust_bridge([]) == []
+
+    def test_unknown_subcommand_passthrough(self):
+        result = _translate_args_for_rust_bridge(["watch", "DEV1"])
+        assert result == ["watch", "DEV1"]
+
+    def test_short_status_args_passthrough(self):
+        """Status with fewer than 3 args passes through unchanged."""
+        result = _translate_args_for_rust_bridge(["status", "DEV1"])
+        assert result == ["status", "DEV1"]
+
+
+class TestRunBridgeLocal:
+    def test_translates_status_args(self):
+        """Status args are translated from C++ to Rust format."""
         with patch("bambox.bridge.subprocess.run") as mock_run:
             mock_run.return_value = subprocess.CompletedProcess([], 0, "", "")
-            _run_bridge_local("/bin/bambox-bridge", ["print", "DEV1", "/f.3mf"], verbose=True)
+            _run_bridge_local("/usr/local/bin/bambox-bridge", ["status", "DEV1", "/tmp/token.json"])
             cmd = mock_run.call_args[0][0]
-            assert cmd == ["/bin/bambox-bridge", "-v", "print", "DEV1", "/f.3mf"]
+            assert cmd == [
+                "/usr/local/bin/bambox-bridge",
+                "-c",
+                "/tmp/token.json",
+                "status",
+                "DEV1",
+            ]
+
+    def test_verbose_flag_before_translated_args(self):
+        """-v must appear before translated positional args."""
+        with patch("bambox.bridge.subprocess.run") as mock_run:
+            mock_run.return_value = subprocess.CompletedProcess([], 0, "", "")
+            _run_bridge_local(
+                "/bin/bambox-bridge",
+                ["print", "/f.3mf", "DEV1", "/tmp/token.json"],
+                verbose=True,
+            )
+            cmd = mock_run.call_args[0][0]
+            assert cmd == [
+                "/bin/bambox-bridge",
+                "-v",
+                "-c",
+                "/tmp/token.json",
+                "print",
+                "/f.3mf",
+                "DEV1",
+            ]
 
 
 class TestRunBridgeFallback:
