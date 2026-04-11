@@ -148,6 +148,28 @@ def _format_progress_bar(percent: int, width: int = 24) -> str:
     return f"[{'█' * filled}{'░' * empty}] {percent}%"
 
 
+_PRINT_STAGES: dict[str, str] = {
+    "0": "printing",
+    "1": "auto bed leveling",
+    "2": "heatbed preheating",
+    "3": "sweeping XY mech mode",
+    "4": "changing filament",
+    "5": "M400 pause",
+    "6": "filament runout pause",
+    "7": "heating hotend",
+    "8": "calibrating extrusion",
+    "9": "scanning bed surface",
+    "10": "inspecting first layer",
+    "11": "identifying build plate type",
+    "12": "calibrating micro lidar",
+    "13": "homing toolhead",
+    "14": "cleaning nozzle tip",
+    "17": "calibrating extrusion flow",
+    "18": "vibration compensation",
+    "19": "motor noise calibration",
+}
+
+
 def _format_status(
     status: dict,
     ams_trays: list[dict] | None = None,
@@ -155,20 +177,53 @@ def _format_status(
 ) -> str:
     """Format printer status dict into a human-readable string.
 
-    When *use_color* is True, Rich markup is used for the state line.
+    When *use_color* is True, Rich markup is used for styling.
     """
     lines: list[str] = []
 
     state = status.get("gcode_state", "?")
     if use_color:
-        lines.append(f"State: {ui.format_state(state)}")
+        lines.append(f"  State:    {ui.format_state(state)}")
     else:
-        lines.append(f"State: {state}")
+        lines.append(f"  State:    {state}")
 
-    nozzle = status.get("nozzle_temper", "?")
-    bed = status.get("bed_temper", "?")
-    lines.append(f"Nozzle: {nozzle}\u00b0C  Bed: {bed}\u00b0C")
+    # Task name
+    task_name = status.get("subtask_name", "")
+    if task_name:
+        lines.append(f"  Task:     {task_name}")
 
+    # Print stage (only when actively printing)
+    if state not in ("IDLE", "FINISH", "FAILED", "", "?"):
+        layer = status.get("layer_num", 0)
+        stage_id = str(status.get("mc_print_stage", ""))
+        if layer and int(layer) > 0:
+            stage = "printing"
+        else:
+            stage = _PRINT_STAGES.get(stage_id, "")
+        if stage:
+            lines.append(f"  Stage:    {stage}")
+
+    # Temperatures — rounded to integers, with target arrows
+    nozzle = status.get("nozzle_temper", 0)
+    nozzle_target = status.get("nozzle_target_temper", 0)
+    bed = status.get("bed_temper", 0)
+    bed_target = status.get("bed_target_temper", 0)
+    try:
+        nozzle_str = f"{float(nozzle):.0f}\u00b0C"
+        if nozzle_target and float(nozzle_target) > 0:
+            nozzle_str += f" \u2192 {float(nozzle_target):.0f}\u00b0C"
+    except (ValueError, TypeError):
+        nozzle_str = f"{nozzle}\u00b0C"
+    try:
+        bed_str = f"{float(bed):.0f}\u00b0C"
+        if bed_target and float(bed_target) > 0:
+            bed_str += f" \u2192 {float(bed_target):.0f}\u00b0C"
+    except (ValueError, TypeError):
+        bed_str = f"{bed}\u00b0C"
+    lines.append(f"  Nozzle:   {nozzle_str}")
+    lines.append(f"  Bed:      {bed_str}")
+
+    # Progress bar
     mc_percent = status.get("mc_percent")
     if mc_percent:
         bar = _format_progress_bar(int(mc_percent))
@@ -184,17 +239,21 @@ def _format_status(
                 eta_str = f"{remaining}min"
         else:
             eta_str = "?"
-        lines.append(f"Progress: {bar}  ETA {eta_str}")
+        lines.append(f"  Progress: {bar}  ETA {eta_str}")
 
-    if status.get("subtask_name"):
-        lines.append(f"Job: {status['subtask_name']}")
-
+    # AMS trays — 1-indexed with color swatches
     if ams_trays:
-        lines.append("AMS trays:")
+        tray_now = int(status.get("ams", {}).get("tray_now", 255))
+        lines.append("  AMS:")
         for t in ams_trays:
-            lines.append(
-                f"  Slot {t['phys_slot']}: {t['type']} #{t['color']} ({t['tray_info_idx']})"
-            )
+            slot_num = t["phys_slot"] + 1  # 1-indexed display
+            active = " <-- printing" if t["phys_slot"] == tray_now else ""
+            color_hex = t["color"]
+            if use_color:
+                swatch = ui.color_swatch(color_hex)
+            else:
+                swatch = "  "
+            lines.append(f"    slot {slot_num}  {t['type']:<12}  {swatch} #{color_hex}{active}")
 
     return "\n".join(lines)
 
@@ -362,7 +421,6 @@ def _resolve_printer(printer_name: str | None, creds_path: Path | None) -> tuple
             raw = tomllib.load(f)
         for name, p in raw.get("printers", {}).items():
             if p.get("serial"):
-                ui.info(f"Using printer '{name}' ({p['serial']})")
                 return p["serial"], name
 
     ui.error("no printer configured. Run 'bambox login' or use --device.")
@@ -878,8 +936,15 @@ def status(
     creds_path = credentials
 
     device_id = device
+    printer_name = ""
     if not device_id:
-        device_id, _ = _resolve_printer(printer, creds_path)
+        device_id, printer_name = _resolve_printer(printer, creds_path)
+
+    def _print_header() -> None:
+        if printer_name:
+            ui.console.print(f"[bold]{printer_name}[/bold]  (bambu-cloud)")
+        else:
+            ui.console.print(f"[bold]{device_id}[/bold]")
 
     creds = load_credentials(creds_path)
     token_file = _write_token_json(creds)
@@ -888,6 +953,7 @@ def status(
             try:
                 while True:
                     ui.console.clear()
+                    _print_header()
                     st = query_status(device_id, token_file, verbose=_verbose)
                     trays = parse_ams_trays(st)
                     ui.console.print(_format_status(st, ams_trays=trays))
@@ -895,6 +961,7 @@ def status(
             except KeyboardInterrupt:
                 ui.console.print()
         else:
+            _print_header()
             st = query_status(device_id, token_file, verbose=_verbose)
             trays = parse_ams_trays(st)
             ui.console.print(_format_status(st, ams_trays=trays))

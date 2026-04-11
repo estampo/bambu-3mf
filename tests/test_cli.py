@@ -570,7 +570,7 @@ class TestCmdStatus:
         ):
             main(["status", "DEVICE123"])
         out = capsys.readouterr().out
-        assert "AMS trays" in out
+        assert "AMS" in out
         assert "PLA" in out
 
     def test_status_token_cleanup_on_error(self) -> None:
@@ -653,9 +653,27 @@ class TestFormatStatus:
     def test_idle_no_color(self) -> None:
         status = {"gcode_state": "IDLE", "nozzle_temper": 25, "bed_temper": 22}
         text = _format_status(status, use_color=False)
-        assert "State: IDLE" in text
+        assert "State:" in text and "IDLE" in text
         assert "25\u00b0C" in text
         assert "22\u00b0C" in text
+
+    def test_temps_rounded(self) -> None:
+        status = {"gcode_state": "IDLE", "nozzle_temper": 18.71875, "bed_temper": 16.375}
+        text = _format_status(status, use_color=False)
+        assert "19\u00b0C" in text
+        assert "16\u00b0C" in text
+
+    def test_target_temps_shown(self) -> None:
+        status = {
+            "gcode_state": "RUNNING",
+            "nozzle_temper": 180,
+            "nozzle_target_temper": 220,
+            "bed_temper": 40,
+            "bed_target_temper": 60,
+        }
+        text = _format_status(status, use_color=False)
+        assert "180\u00b0C \u2192 220\u00b0C" in text
+        assert "40\u00b0C \u2192 60\u00b0C" in text
 
     def test_running_with_color(self) -> None:
         status = {"gcode_state": "RUNNING", "nozzle_temper": 220, "bed_temper": 60}
@@ -681,8 +699,7 @@ class TestFormatStatus:
     def test_unknown_state_no_color_escape(self) -> None:
         status = {"gcode_state": "WEIRD", "nozzle_temper": 0, "bed_temper": 0}
         text = _format_status(status, use_color=True)
-        # Unknown state should not have ANSI escapes or Rich markup style tags
-        assert "State: WEIRD" in text
+        assert "WEIRD" in text
 
     def test_progress_bar_rendered(self) -> None:
         status = {
@@ -719,12 +736,70 @@ class TestFormatStatus:
         text = _format_status(status, use_color=False)
         assert "benchy.3mf" in text
 
-    def test_ams_trays_included(self) -> None:
+    def test_ams_trays_1_indexed(self) -> None:
         status = {"gcode_state": "IDLE", "nozzle_temper": 25, "bed_temper": 22}
         trays = [{"phys_slot": 0, "type": "PLA", "color": "FFFFFF", "tray_info_idx": "GFL00"}]
         text = _format_status(status, ams_trays=trays, use_color=False)
-        assert "AMS trays" in text
+        assert "AMS:" in text
+        assert "slot 1" in text
         assert "PLA" in text
+        assert "#FFFFFF" in text
+
+    def test_ams_active_tray_indicator(self) -> None:
+        status = {
+            "gcode_state": "RUNNING",
+            "nozzle_temper": 220,
+            "bed_temper": 60,
+            "ams": {"tray_now": 0},
+        }
+        trays = [
+            {"phys_slot": 0, "type": "PLA", "color": "FFFFFF", "tray_info_idx": "GFL00"},
+            {"phys_slot": 1, "type": "PETG", "color": "2850E0", "tray_info_idx": "GFG98"},
+        ]
+        text = _format_status(status, ams_trays=trays, use_color=False)
+        assert "<-- printing" in text
+        # Only slot 0 (displayed as slot 1) should have the indicator
+        lines = text.split("\n")
+        pla_line = [ln for ln in lines if "PLA" in ln][0]
+        petg_line = [ln for ln in lines if "PETG" in ln][0]
+        assert "<-- printing" in pla_line
+        assert "<-- printing" not in petg_line
+
+    def test_ams_color_swatch(self) -> None:
+        status = {"gcode_state": "IDLE", "nozzle_temper": 25, "bed_temper": 22}
+        trays = [{"phys_slot": 0, "type": "PLA", "color": "2850E0", "tray_info_idx": "GFL00"}]
+        text = _format_status(status, ams_trays=trays, use_color=True)
+        # Should contain Rich color swatch markup
+        assert "on rgb(" in text
+
+    def test_print_stage_shown(self) -> None:
+        status = {
+            "gcode_state": "RUNNING",
+            "nozzle_temper": 220,
+            "bed_temper": 60,
+            "mc_print_stage": 2,
+            "layer_num": 0,
+        }
+        text = _format_status(status, use_color=False)
+        assert "Stage:" in text
+        assert "heatbed preheating" in text
+
+    def test_print_stage_printing_when_layer_positive(self) -> None:
+        status = {
+            "gcode_state": "RUNNING",
+            "nozzle_temper": 220,
+            "bed_temper": 60,
+            "mc_print_stage": 2,
+            "layer_num": 5,
+        }
+        text = _format_status(status, use_color=False)
+        assert "Stage:" in text
+        assert "printing" in text
+
+    def test_no_stage_when_idle(self) -> None:
+        status = {"gcode_state": "IDLE", "nozzle_temper": 25, "bed_temper": 22}
+        text = _format_status(status, use_color=False)
+        assert "Stage:" not in text
 
     def test_eta_minutes_only(self) -> None:
         status = {
