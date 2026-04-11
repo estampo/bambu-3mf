@@ -5,6 +5,11 @@
 [![PyPI version](https://img.shields.io/pypi/v/bambu-3mf)](https://pypi.org/project/bambu-3mf/)
 [![Python versions](https://img.shields.io/pypi/pyversions/bambu-3mf)](https://pypi.org/project/bambu-3mf/)
 
+> **Experimental software — use at your own risk.**
+> bambox talks directly to Bambu Lab printer firmware. Incorrect packaging,
+> settings, or G-code can cause failed prints, nozzle clogs, or physical
+> damage to your printer. Always review output before sending to hardware.
+
 Package plain G-code into Bambu Lab `.gcode.3mf` files — no OrcaSlicer required.
 
 `bambox` is a standalone Python library and CLI for creating printer-ready
@@ -13,35 +18,42 @@ packaging format (metadata, checksums, settings) so that any slicer —
 CuraEngine, PrusaSlicer, KiriMoto, or a custom toolpath generator — can target
 Bambu printers.
 
+## What You Can Do
+
+**Pack G-code** (no extra dependencies) — build `.gcode.3mf` archives from
+any G-code source with full 544-key settings generation. Works on Linux,
+macOS, and Windows.
+
+**Validate archives** — check `.gcode.3mf` files for errors before printing.
+
+**Print and monitor** (requires bridge) — send archives to Bambu printers
+via cloud and query printer status. Requires either the native `bambox-bridge`
+binary or Docker (see [Bridge Setup](#bridge-setup) below).
+
 ## Where This Fits
 
-`bambox` is one piece of a three-project architecture that decouples
-[estampo](https://github.com/estampo/estampo) from OrcaSlicer:
+`bambox` is part of the [estampo](https://github.com/estampo/estampo) project
+that decouples slicer pipelines from OrcaSlicer:
 
 ```
 estampo (pipeline + slicer backends)
     ↓ G-code
-bambox (packaging + settings generation)
-    ↓ .gcode.3mf
-bambu-cloud (printer communication)
-    ↓ MQTT/FTP
+bambox (packaging + settings + printing)
+    ↓ .gcode.3mf → printer
 Bambu printer
 ```
 
 **estampo** orchestrates the build pipeline — plate arrangement, profile
 management, CI integration. It can invoke any slicer backend and delegates
-Bambu-specific concerns downward.
+Bambu-specific concerns to bambox.
 
-**bambox** (this project) owns two things: (1) the `.gcode.3mf` archive
-format that Bambu firmware requires, and (2) the slicer settings blob
-(`project_settings.config`) that would normally come from OrcaSlicer. It can
-generate the full 544-key settings from just a machine name and filament types.
+**bambox** (this project) owns: (1) the `.gcode.3mf` archive format that
+Bambu firmware requires, (2) the slicer settings blob
+(`project_settings.config`) that would normally come from OrcaSlicer, and
+(3) printer communication via the cloud bridge. It can generate the full
+544-key settings from just a machine name and filament types.
 
-**bambu-cloud** (currently the `bridge` module here, to be extracted) handles
-printer communication via the Bambu Network Library Docker bridge.
-
-Each project is independently useful. You don't need estampo to use bambox,
-and you don't need bambox to use bambu-cloud.
+You don't need estampo to use bambox — it works standalone.
 
 ## Installation
 
@@ -54,6 +66,36 @@ Or with [uv](https://docs.astral.sh/uv/):
 ```bash
 uv pip install bambox
 ```
+
+This is all you need for `pack`, `repack`, and `validate`. For `print`,
+`status`, and `login` you also need the bridge — see below.
+
+### Bridge Setup
+
+The `print`, `status`, and `login` commands communicate with Bambu printers
+via a cloud bridge. You have two options:
+
+**Option A — Native binary (recommended, Linux and macOS):**
+
+```bash
+curl -fsSL https://github.com/estampo/bambox/releases/latest/download/install.sh | sh
+```
+
+This installs `bambox-bridge` to `~/.local/bin`.
+
+**Option B — Docker (Linux, macOS, Windows):**
+
+If you have Docker installed and running, bambox uses the
+`estampo/cloud-bridge` image automatically — no extra setup needed.
+This is the only option on Windows.
+
+### Platform Support
+
+| Feature | Linux | macOS | Windows |
+|---------|-------|-------|---------|
+| `pack`, `repack`, `validate` | Yes | Yes | Yes |
+| `print`, `status`, `login` (native bridge) | Yes | Yes | No |
+| `print`, `status`, `login` (Docker bridge) | Yes | Yes | Yes |
 
 ## CLI
 
@@ -233,7 +275,7 @@ pack_gcode_3mf(
 )
 ```
 
-### Cloud printing
+### Cloud printing (requires bridge)
 
 ```python
 from bambox.bridge import cloud_print, query_status
@@ -251,7 +293,7 @@ from bambox.validate import validate_3mf
 |--------|---------|
 | `pack` | Core `.gcode.3mf` archive construction, XML metadata, MD5 checksums |
 | `settings` | 544-key `project_settings.config` builder from machine + filament profiles |
-| `bridge` | Cloud printing via Docker bridge, credentials, AMS tray mapping |
+| `bridge` | Cloud printing via native or Docker bridge, AMS tray mapping |
 | `validate` | Archive validation checks, warnings, and reference comparison |
 | `cli` | Typer CLI commands — delegates to other modules |
 | `cura` | CuraEngine Docker invocation and profile conversion |
