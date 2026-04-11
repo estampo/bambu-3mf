@@ -229,3 +229,32 @@ class TestCheckCodesExist:
             # Count occurrences as string literals (finding constructors)
             matches = re.findall(rf'"{code}"', source)
             assert len(matches) >= 1, f"Code {code} not found"
+
+
+# ---------------------------------------------------------------------------
+# 4. Bridge version matches Python package version
+# ---------------------------------------------------------------------------
+
+
+class TestVersionSync:
+    """Ensure bridge/Cargo.toml version stays in sync with pyproject.toml."""
+
+    def test_bridge_version_matches_python(self) -> None:
+        root = Path(__file__).parent.parent
+        pyproject = root / "pyproject.toml"
+        cargo_toml = root / "bridge" / "Cargo.toml"
+
+        import tomllib
+
+        with open(pyproject, "rb") as f:
+            py_version = tomllib.load(f)["project"]["version"]
+
+        cargo_text = cargo_toml.read_text()
+        match = re.search(r'^version\s*=\s*"([^"]+)"', cargo_text, re.MULTILINE)
+        assert match, "No version found in bridge/Cargo.toml"
+        cargo_version = match.group(1)
+
+        assert cargo_version == py_version, (
+            f"Version mismatch: bridge/Cargo.toml={cargo_version}, "
+            f"pyproject.toml={py_version}. Both must match."
+        )

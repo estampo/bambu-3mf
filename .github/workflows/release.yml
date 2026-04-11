@@ -91,6 +91,12 @@ jobs:
             echo "::error::Version mismatch: pyproject.toml=$TOML_VERSION, release=$VERSION"
             exit 1
           fi
+
+          CARGO_VERSION=$(grep -m1 '^version = ' bridge/Cargo.toml | sed 's/version = "\(.*\)"/\1/')
+          if [[ "$CARGO_VERSION" != "$VERSION" ]]; then
+            echo "::error::Version mismatch: bridge/Cargo.toml=$CARGO_VERSION, release=$VERSION"
+            exit 1
+          fi
           echo "::notice::Releasing version $VERSION"
 
   # ── Build package ───────────────────────────────────────────────────
