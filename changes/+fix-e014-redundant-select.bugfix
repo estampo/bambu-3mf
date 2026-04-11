@@ -1,0 +1,1 @@
+Fix E014 false positive on redundant extruder re-select after M620/M621 block
