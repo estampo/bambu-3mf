@@ -2,8 +2,8 @@
 
 [![CI](https://github.com/estampo/bambox/actions/workflows/ci.yml/badge.svg)](https://github.com/estampo/bambox/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/estampo/bambox/branch/main/graph/badge.svg)](https://codecov.io/gh/estampo/bambox)
-[![PyPI version](https://img.shields.io/pypi/v/bambu-3mf)](https://pypi.org/project/bambu-3mf/)
-[![Python versions](https://img.shields.io/pypi/pyversions/bambu-3mf)](https://pypi.org/project/bambu-3mf/)
+[![PyPI version](https://img.shields.io/pypi/v/bambox)](https://pypi.org/project/bambox/)
+[![Python versions](https://img.shields.io/pypi/pyversions/bambox)](https://pypi.org/project/bambox/)
 
 > **Experimental software — use at your own risk.**
 > bambox talks directly to Bambu Lab printer firmware. Incorrect packaging,
