@@ -980,5 +980,6 @@ def status(
 def main(argv: list[str] | None = None) -> None:
     try:
         app(argv, standalone_mode=False)
-    except click.UsageError:
+    except click.UsageError as exc:
+        ui.error(str(exc))
         sys.exit(2)
