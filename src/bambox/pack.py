@@ -19,6 +19,11 @@ from xml.sax.saxutils import escape as _xml_escape_base
 
 log = logging.getLogger(__name__)
 
+# BambuStudio version we present in archive metadata and HTTP headers.
+# Must match a real release — the cloud API validates this for request signing.
+# Source: https://github.com/bambulab/BambuStudio/blob/master/src/libslic3r/ProjectTask.hpp
+BAMBU_STUDIO_VERSION = "02.05.00.66"
+
 
 def xml_escape(value: str) -> str:
     """Escape a string for use inside XML double-quoted attribute values."""
@@ -190,10 +195,10 @@ class SliceInfo:
     warnings: list[WarningInfo] = field(default_factory=list)
     bed_type: str = "textured_plate"  # plate_1.json bed type
     plate_data: dict[str, object] | None = None  # raw plate_1.json passthrough
-    application: str = "BambuStudio-02.05.00.66"
+    application: str = f"BambuStudio-{BAMBU_STUDIO_VERSION}"
     model_xml: str = ""  # raw 3D/3dmodel.model passthrough (overrides application)
     # BBS 02.05+ fields
-    client_version: str = "02.05.00.66"
+    client_version: str = BAMBU_STUDIO_VERSION
     extruder_type: int = 0
     nozzle_volume_type: int = 0
     first_layer_time: float | None = None

@@ -12,6 +12,14 @@ use std::time::Duration;
 use crate::callbacks::{self, CallbackState};
 use crate::ffi;
 
+/// BambuStudio version we present in X-BBL-Client-Version headers.
+///
+/// Must match a real BambuStudio release — the cloud API validates this for
+/// request signing.  Find the latest at:
+/// <https://github.com/bambulab/BambuStudio/blob/master/src/libslic3r/ProjectTask.hpp>
+/// (look for `#define BAMBU_NETWORK_PLUGIN_VERSION`).
+pub const BAMBU_STUDIO_VERSION: &str = "02.05.00.66";
+
 /// Convert a string to CString, returning an error instead of panicking on null bytes.
 fn to_cstring(s: &str) -> Result<CString, String> {
     CString::new(s).map_err(|e| format!("null byte in string: {e}"))
@@ -350,7 +358,7 @@ impl BambuAgent {
         let vals_raw: Vec<String> = vec![
             "slicer".into(),
             "BambuStudio".into(),
-            "02.05.00.66".into(),
+            BAMBU_STUDIO_VERSION.into(),
             os_type.into(),
             "6.8.0".into(),
             device_id,
@@ -934,6 +942,45 @@ email = "user@example.com"
         let err = Credentials::from_toml(&path).unwrap_err();
         assert!(err.contains("invalid TOML"));
         let _ = std::fs::remove_file(&path);
+    }
+
+    // --- X-BBL header correctness tests ---
+    //
+    // These exist because we once shipped fabricated header values that the
+    // cloud API silently accepted — until Bambu turned on signing enforcement
+    // and every print request started returning -26.
+
+    #[test]
+    fn stable_device_id_is_valid_uuid() {
+        let id = BambuAgent::stable_device_id();
+        assert!(
+            uuid::Uuid::parse_str(&id).is_ok(),
+            "stable_device_id must be a valid UUID, got: {id}"
+        );
+    }
+
+    #[test]
+    fn stable_device_id_is_deterministic() {
+        let a = BambuAgent::stable_device_id();
+        let b = BambuAgent::stable_device_id();
+        assert_eq!(a, b, "device ID must be stable across calls");
+    }
+
+    #[test]
+    fn bambu_studio_version_matches_expected_format() {
+        // Format: NN.NN.NN.NN — four dot-separated groups of two digits.
+        let parts: Vec<&str> = BAMBU_STUDIO_VERSION.split('.').collect();
+        assert_eq!(
+            parts.len(),
+            4,
+            "version must have 4 parts: {BAMBU_STUDIO_VERSION}"
+        );
+        for part in &parts {
+            assert!(
+                part.len() == 2 && part.chars().all(|c| c.is_ascii_digit()),
+                "each version part must be 2 digits, got '{part}' in {BAMBU_STUDIO_VERSION}"
+            );
+        }
     }
 }
 

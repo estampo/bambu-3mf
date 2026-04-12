@@ -6,6 +6,8 @@ import getpass
 import json
 import logging
 
+from bambox.pack import BAMBU_STUDIO_VERSION
+
 log = logging.getLogger(__name__)
 
 API_BASE = "https://api.bambulab.com"
@@ -13,8 +15,8 @@ API_BASE = "https://api.bambulab.com"
 SLICER_HEADERS = {
     "X-BBL-Client-Name": "OrcaSlicer",
     "X-BBL-Client-Type": "slicer",
-    "X-BBL-Client-Version": "02.03.01.00",
-    "User-Agent": "bambu_network_agent/02.03.01.00",
+    "X-BBL-Client-Version": BAMBU_STUDIO_VERSION,
+    "User-Agent": f"bambu_network_agent/{BAMBU_STUDIO_VERSION}",
     "Content-Type": "application/json",
 }
 

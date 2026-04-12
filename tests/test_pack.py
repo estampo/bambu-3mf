@@ -14,6 +14,7 @@ from pathlib import Path
 from xml.etree import ElementTree as ET
 
 from bambox.pack import (
+    BAMBU_STUDIO_VERSION,
     FilamentInfo,
     ObjectInfo,
     SliceInfo,
@@ -690,3 +691,38 @@ class TestFileOutput:
         with zipfile.ZipFile(out) as z:
             assert "Metadata/plate_1.gcode" in z.namelist()
             assert "Metadata/project_settings.config" in z.namelist()
+
+
+# ---------------------------------------------------------------------------
+# Version string consistency
+# ---------------------------------------------------------------------------
+
+
+class TestBambuStudioVersion:
+    """Guard against fabricated or stale version strings.
+
+    We once shipped a made-up version that the cloud API silently accepted —
+    until Bambu enabled signing and every request returned -26.
+    """
+
+    def test_version_format(self) -> None:
+        """Version must be NN.NN.NN.NN — four dot-separated 2-digit groups."""
+        parts = BAMBU_STUDIO_VERSION.split(".")
+        assert len(parts) == 4, f"expected 4 parts: {BAMBU_STUDIO_VERSION}"
+        for part in parts:
+            assert len(part) == 2 and part.isdigit(), (
+                f"each part must be 2 digits, got '{part}' in {BAMBU_STUDIO_VERSION}"
+            )
+
+    def test_slice_info_defaults_use_constant(self) -> None:
+        """SliceInfo defaults must reference the shared constant, not a copy."""
+        info = SliceInfo()
+        assert info.client_version == BAMBU_STUDIO_VERSION
+        assert info.application == f"BambuStudio-{BAMBU_STUDIO_VERSION}"
+
+    def test_auth_headers_use_constant(self) -> None:
+        """auth.py SLICER_HEADERS must use the same version constant."""
+        from bambox.auth import SLICER_HEADERS
+
+        assert SLICER_HEADERS["X-BBL-Client-Version"] == BAMBU_STUDIO_VERSION
+        assert BAMBU_STUDIO_VERSION in SLICER_HEADERS["User-Agent"]
