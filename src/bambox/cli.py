@@ -1093,6 +1093,102 @@ def _status_watch(
 
 
 # ---------------------------------------------------------------------------
+# Daemon management
+# ---------------------------------------------------------------------------
+
+daemon_app = typer.Typer(
+    name="daemon", help="Manage the background bridge daemon", no_args_is_help=True
+)
+app.add_typer(daemon_app)
+
+
+@daemon_app.command(name="status")
+def daemon_status() -> None:
+    """Check if the bridge daemon is running."""
+    import urllib.request
+
+    from bambox.bridge import DAEMON_URL
+
+    try:
+        req = urllib.request.Request(f"{DAEMON_URL}/health", method="GET")
+        with urllib.request.urlopen(req, timeout=2) as resp:
+            data = json.loads(resp.read())
+            ui.success("Daemon is running")
+            if data.get("connected"):
+                ui.console.print("  MQTT: [green]connected[/green]")
+            else:
+                ui.console.print("  MQTT: [yellow]not connected[/yellow]")
+    except (OSError, Exception):
+        ui.info("Daemon is not running")
+        sys.exit(1)
+
+
+@daemon_app.command()
+def stop() -> None:
+    """Stop the bridge daemon."""
+    import urllib.request
+
+    from bambox.bridge import DAEMON_URL
+
+    try:
+        req = urllib.request.Request(f"{DAEMON_URL}/shutdown", method="POST")
+        urllib.request.urlopen(req, timeout=5)
+    except (OSError, Exception):
+        pass
+    ui.success("Daemon stopped")
+
+
+@daemon_app.command()
+def start(
+    credentials: Annotated[
+        Optional[Path], typer.Option("-c", "--credentials", help="Path to credentials.toml")
+    ] = None,
+) -> None:
+    """Start the bridge daemon in the background."""
+    from bambox.bridge import _daemon_ping, _start_daemon, _write_token_json, load_credentials
+
+    if _daemon_ping():
+        ui.info("Daemon is already running")
+        return
+
+    creds = load_credentials(credentials)
+    token_file = _write_token_json(creds)
+    if _start_daemon(token_file, verbose=_verbose):
+        ui.success("Daemon started")
+    else:
+        ui.error("Failed to start daemon")
+        sys.exit(1)
+
+
+@daemon_app.command()
+def restart(
+    credentials: Annotated[
+        Optional[Path], typer.Option("-c", "--credentials", help="Path to credentials.toml")
+    ] = None,
+) -> None:
+    """Restart the bridge daemon."""
+    import urllib.request
+
+    from bambox.bridge import DAEMON_URL, _start_daemon, _write_token_json, load_credentials
+
+    # Stop if running
+    try:
+        req = urllib.request.Request(f"{DAEMON_URL}/shutdown", method="POST")
+        urllib.request.urlopen(req, timeout=5)
+    except (OSError, Exception):
+        pass
+    time.sleep(1)
+
+    creds = load_credentials(credentials)
+    token_file = _write_token_json(creds)
+    if _start_daemon(token_file, verbose=_verbose):
+        ui.success("Daemon restarted")
+    else:
+        ui.error("Failed to start daemon")
+        sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
