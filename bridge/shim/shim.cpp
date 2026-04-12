@@ -138,9 +138,17 @@ static fn_start_print               fp_start_print = nullptr;
 // Helper
 // ---------------------------------------------------------------------------
 
+/// Number of successfully resolved symbols after bambu_shim_load().
+static int g_resolved_count = 0;
+
+/// Total number of symbols that bambu_shim_load() attempts to resolve.
+static int g_expected_count = 0;
+
 template<typename T>
 static T load_fn(const char* name) {
     void* ptr = dlsym(g_lib, name);
+    g_expected_count++;
+    if (ptr) g_resolved_count++;
     return reinterpret_cast<T>(ptr);
 }
 
@@ -155,6 +163,9 @@ int bambu_shim_load(const char* lib_path) {
 
     g_lib = dlopen(lib_path, RTLD_LAZY);
     if (!g_lib) return -1;
+
+    g_resolved_count = 0;
+    g_expected_count = 0;
 
     fp_create_agent    = load_fn<fn_create_agent>("bambu_network_create_agent");
     fp_destroy_agent   = load_fn<fn_destroy_agent>("bambu_network_destroy_agent");
@@ -181,12 +192,24 @@ int bambu_shim_load(const char* lib_path) {
     fp_start_sub       = load_fn<fn_start_subscribe>("bambu_network_start_subscribe");
     fp_start_print     = load_fn<fn_start_print>("bambu_network_start_print");
 
-    if (!fp_create_agent || !fp_change_user || !fp_connect_server) {
+    // All core functions must resolve — fail early rather than segfault later.
+    if (!fp_create_agent || !fp_destroy_agent || !fp_change_user ||
+        !fp_connect_server || !fp_start || !fp_set_machine ||
+        !fp_send_msg || !fp_start_sub || !fp_set_message_cb ||
+        !fp_set_server_cb || !fp_start_print) {
         dlclose(g_lib);
         g_lib = nullptr;
         return -2;
     }
     return 0;
+}
+
+int bambu_shim_resolved_count() {
+    return g_resolved_count;
+}
+
+int bambu_shim_expected_count() {
+    return g_expected_count;
 }
 
 const char* bambu_shim_load_error() {
