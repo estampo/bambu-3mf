@@ -98,7 +98,7 @@ typedef int (*fn_set_get_country_code_fn)(void*, GetCountryCodeFn);
 typedef int (*fn_set_on_user_login_fn)(void*, OnUserLoginFn);
 typedef int (*fn_set_on_subscribe_failure_fn)(void*, GetSubscribeFailureFn);
 typedef int (*fn_set_extra_http_header)(void*, std::map<std::string, std::string>);
-typedef int (*fn_send_message)(void*, std::string, std::string, int);
+typedef int (*fn_send_message)(void*, std::string, std::string, int, int);
 typedef int (*fn_send_message_to_printer)(void*, std::string, std::string, int, int);
 typedef int (*fn_start_subscribe)(void*, std::string);
 typedef int (*fn_start_print)(void*, PrintParams, OnUpdateStatusFn, WasCancelledFn, OnWaitFn);
@@ -294,7 +294,8 @@ int bambu_shim_start_subscribe(void* agent, const char* module) {
 
 int bambu_shim_send_message(void* agent, const char* dev_id, const char* json, int qos) {
     if (!fp_send_msg) return -1;
-    return fp_send_msg(agent, std::string(dev_id), std::string(json), qos);
+    // flag=0 (no signing/encryption) — matches BambuStudio's default
+    return fp_send_msg(agent, std::string(dev_id), std::string(json), qos, 0);
 }
 
 int bambu_shim_send_message_to_printer(

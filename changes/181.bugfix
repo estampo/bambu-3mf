@@ -1,0 +1,1 @@
+Fix ``send_message`` FFI signature: add missing ``flag`` parameter, fixing cancel and other MQTT commands returning -2.
