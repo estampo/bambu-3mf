@@ -217,6 +217,36 @@ def load_printer_credentials(name: str) -> dict[str, str]:
     return creds
 
 
+def write_token_json(cloud: dict[str, str], directory: Path | None = None) -> Path:
+    """Write a temp JSON token file for the bridge binary.
+
+    Uses ``mkstemp`` + ``fchmod`` so the file is created with 0o600 from the
+    start, avoiding any window where credentials are world-readable.
+
+    Returns the path (caller must clean up).
+    """
+    bridge_data = {
+        "token": cloud["token"],
+        "refreshToken": cloud.get("refresh_token", ""),
+        "email": cloud.get("email", ""),
+        "uid": cloud.get("uid", ""),
+    }
+    d = directory or _cache_dir()
+    if directory:
+        d.mkdir(parents=True, exist_ok=True)
+    fd, path = tempfile.mkstemp(suffix=".json", prefix="bambu_token_", dir=str(d))
+    try:
+        if sys.platform != "win32":
+            os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w") as f:
+            json.dump(bridge_data, f)
+    except BaseException:
+        os.close(fd)
+        os.unlink(path)
+        raise
+    return Path(path)
+
+
 @contextmanager
 def cloud_token_json():
     """Context manager that yields a temp JSON file path for the bridge binary.
@@ -228,28 +258,7 @@ def cloud_token_json():
     if not cloud:
         raise RuntimeError("No cloud credentials found.\nRun 'bambox login' to log in.")
 
-    # Bridge expects camelCase keys
-    bridge_data = {
-        "token": cloud["token"],
-        "refreshToken": cloud.get("refresh_token", ""),
-        "email": cloud.get("email", ""),
-        "uid": cloud.get("uid", ""),
-    }
-
-    cache_dir = _cache_dir()
-    if sys.platform != "win32":
-        fd = tempfile.mkstemp(suffix=".json", prefix="bambu_token_", dir=str(cache_dir))
-        os.fchmod(fd[0], 0o600)
-        with os.fdopen(fd[0], "w") as f:
-            json.dump(bridge_data, f)
-        tmp_path = Path(fd[1])
-    else:
-        tmp = tempfile.NamedTemporaryFile(
-            mode="w", suffix=".json", prefix="bambu_token_", dir=cache_dir, delete=False
-        )
-        json.dump(bridge_data, tmp)
-        tmp.close()
-        tmp_path = Path(tmp.name)
+    tmp_path = write_token_json(cloud)
     try:
         yield tmp_path
     finally:

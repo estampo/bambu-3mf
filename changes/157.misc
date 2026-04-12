@@ -1,0 +1,1 @@
+Consolidate duplicated ``MIN_SLOTS`` constant, array padding logic, and secure temp-file writing into single canonical implementations.

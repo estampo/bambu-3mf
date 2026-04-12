@@ -26,6 +26,20 @@ def xml_escape(value: str) -> str:
 # All per-filament arrays in project_settings must be padded to this length.
 MIN_SLOTS = 5
 
+
+def pad_to_slots(items: list, min_slots: int = MIN_SLOTS) -> list:
+    """Pad *items* by repeating its last element until it reaches *min_slots*.
+
+    Returns a new list (never mutates the input).
+    """
+    if not items or len(items) >= min_slots:
+        return list(items)
+    result = list(items)
+    while len(result) < min_slots:
+        result.append(result[-1])
+    return result
+
+
 # Keys absent from OrcaSlicer CLI --min-save output but required by Bambu Connect.
 _BC_REQUIRED_KEYS: dict[str, object] = {
     "bbl_use_printhost": "1",
@@ -342,8 +356,7 @@ def fixup_project_settings(
             result[key] = list(default) if isinstance(default, list) else default
     for key, val in result.items():
         if isinstance(val, list) and 0 < len(val) < min_slots:
-            while len(val) < min_slots:
-                val.append(val[-1])
+            result[key] = pad_to_slots(val, min_slots)
     return result
 
 

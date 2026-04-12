@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-MIN_SLOTS = 5  # P1S: 4 AMS + 1 external spool
+from bambox.pack import MIN_SLOTS, pad_to_slots
 
 _DATA_DIR = Path(__file__).parent / "profiles"
 
@@ -94,16 +94,13 @@ def build_project_settings(
     # Pad filament list to min_slots
     if not filaments:
         filaments = ["PLA"]
-    while len(filaments) < min_slots:
-        filaments.append(filaments[-1])
+    filaments = pad_to_slots(filaments, min_slots)
 
     # Load filament profiles
     fil_profiles = [_load_json(_filament_profile_path(ft)) for ft in filaments]
 
     # Pad colors
-    colors = list(filament_colors or ["#F2754E"])
-    while len(colors) < min_slots:
-        colors.append(colors[-1])
+    colors = pad_to_slots(list(filament_colors or ["#F2754E"]), min_slots)
 
     # Build the result: start with base scalars and uniform arrays
     result: dict[str, object] = {}
@@ -138,10 +135,7 @@ def build_project_settings(
 
     # Override filament_ids if provided
     if filament_ids:
-        ids = list(filament_ids)
-        while len(ids) < min_slots:
-            ids.append(ids[-1])
-        result["filament_ids"] = ids
+        result["filament_ids"] = pad_to_slots(list(filament_ids), min_slots)
 
     # Apply scalar overrides last
     if overrides:

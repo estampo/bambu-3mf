@@ -14,7 +14,6 @@ import logging
 import os
 import shutil
 import subprocess
-import sys
 import tempfile
 import tomllib
 import xml.etree.ElementTree as ET
@@ -70,35 +69,11 @@ def load_credentials(path: Path | None = None) -> dict[str, str]:
 def _write_token_json(cloud: dict[str, str], directory: Path | None = None) -> Path:
     """Write a temp JSON token file for the bridge binary.
 
-    Uses ``mkstemp`` + ``fchmod`` so the file is created with 0o600 from the
-    start, avoiding any window where credentials are world-readable.
-
-    Returns the path (caller must clean up).
+    Thin wrapper around :func:`bambox.credentials.write_token_json`.
     """
-    bridge_data = {
-        "token": cloud["token"],
-        "refreshToken": cloud.get("refresh_token", ""),
-        "email": cloud.get("email", ""),
-        "uid": cloud.get("uid", ""),
-    }
-    if directory:
-        d = directory
-        d.mkdir(parents=True, exist_ok=True)
-    else:
-        from bambox.credentials import _cache_dir
+    from bambox.credentials import write_token_json
 
-        d = _cache_dir()
-    fd, path = tempfile.mkstemp(suffix=".json", prefix="bambu_token_", dir=str(d))
-    try:
-        if sys.platform != "win32":
-            os.fchmod(fd, 0o600)
-        with os.fdopen(fd, "w") as f:
-            json.dump(bridge_data, f)
-    except BaseException:
-        os.close(fd)
-        os.unlink(path)
-        raise
-    return Path(path)
+    return write_token_json(cloud, directory=directory)
 
 
 # ---------------------------------------------------------------------------

@@ -21,8 +21,7 @@ from enum import Enum
 from pathlib import Path
 from typing import IO
 
-# Minimum AMS slot count for P1S (4 AMS + 1 external spool).
-MIN_SLOTS = 5
+from bambox.pack import MIN_SLOTS
 
 # Files that must exist in every valid .gcode.3mf archive.
 REQUIRED_ARCHIVE_FILES = {
