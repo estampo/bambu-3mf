@@ -3,6 +3,9 @@ name: Build bridge binaries
 on:
   push:
     tags: ['v*']
+    branches: [main]
+    paths:
+      - 'bridge/**'
   pull_request:
     paths:
       - 'bridge/**'
