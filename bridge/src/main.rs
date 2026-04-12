@@ -431,12 +431,24 @@ async fn main() {
             ams_mapping2,
             config_3mf,
         } => {
-            // Validate the 3MF file exists
+            // Validate the 3MF file exists and resolve to absolute path —
+            // the Bambu SDK requires absolute paths for file uploads.
             let threemf = std::path::Path::new(&threemf_path);
             if !threemf.is_file() {
                 eprintln!("error: file not found: {threemf_path}");
                 process::exit(1);
             }
+            let threemf_abs = threemf.canonicalize().unwrap_or_else(|e| {
+                eprintln!("error: cannot resolve path {threemf_path}: {e}");
+                process::exit(1);
+            });
+            let config_abs = config_3mf.as_ref().map(|p| {
+                let path = std::path::Path::new(p);
+                path.canonicalize().unwrap_or_else(|e| {
+                    eprintln!("error: cannot resolve config path {p}: {e}");
+                    process::exit(1);
+                }).to_string_lossy().into_owned()
+            });
 
             suppress_stdout();
             let creds = load_credentials(&creds_path);
@@ -444,9 +456,9 @@ async fn main() {
 
             let request = agent::PrintRequest {
                 device_id: device_id.clone(),
-                filename: threemf_path.clone(),
+                filename: threemf_abs.to_string_lossy().into_owned(),
                 project_name: project.clone(),
-                config_filename: config_3mf.clone(),
+                config_filename: config_abs,
                 ams_mapping: ams_mapping.clone(),
                 ams_mapping2: ams_mapping2.clone(),
                 bed_leveling: true,
