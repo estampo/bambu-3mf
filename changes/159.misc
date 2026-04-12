@@ -1,0 +1,1 @@
+Replace duplicated Cura definition test fixtures with symlinks to the canonical source files in ``src/bambox/data/cura/``.
