@@ -612,23 +612,33 @@ pub fn spawn_cache_updater(state: SharedState) {
             // Update cache for each device that sent messages
             let mut cache = state.cache.write().unwrap();
             for (dev_id, msg) in best_per_device {
-                // Only cache messages that look like full status (have gcode_state)
-                if msg.payload.len() < 100 || !msg.payload.contains("gcode_state") {
-                    continue;
+                // Full status message — update both payload and timestamp
+                if msg.payload.len() >= 100 && msg.payload.contains("gcode_state") {
+                    if let Ok(payload) = serde_json::from_str::<serde_json::Value>(&msg.payload) {
+                        tracing::trace!(
+                            device_id = %dev_id,
+                            payload_len = msg.payload.len(),
+                            "cache updated by background task"
+                        );
+                        cache.insert(
+                            dev_id,
+                            DeviceStatus {
+                                payload,
+                                updated_at: Instant::now(),
+                            },
+                        );
+                        continue;
+                    }
                 }
-                if let Ok(payload) = serde_json::from_str::<serde_json::Value>(&msg.payload) {
+                // Heartbeat or partial message — keep existing payload but refresh
+                // the timestamp so the cache doesn't go stale while subscribed.
+                if let Some(entry) = cache.get_mut(&dev_id) {
                     tracing::trace!(
                         device_id = %dev_id,
                         payload_len = msg.payload.len(),
-                        "cache updated by background task"
+                        "cache timestamp refreshed by heartbeat"
                     );
-                    cache.insert(
-                        dev_id,
-                        DeviceStatus {
-                            payload,
-                            updated_at: Instant::now(),
-                        },
-                    );
+                    entry.updated_at = Instant::now();
                 }
             }
         }
