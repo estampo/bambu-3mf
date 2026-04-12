@@ -540,6 +540,28 @@ def query_status(
         )
 
 
+def _cancel_via_daemon(device_id: str) -> dict | None:
+    """Try cancelling via the daemon HTTP API.  Returns dict or None."""
+    if not _daemon_ping():
+        return None
+    import urllib.error
+    import urllib.request
+
+    url = f"{DAEMON_URL}/cancel/{device_id}"
+    req = urllib.request.Request(url, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = json.loads(resp.read())
+            if data.get("sent"):
+                data["result"] = "ok"
+            return data
+    except urllib.error.HTTPError as e:
+        raise RuntimeError(f"Daemon cancel failed: HTTP {e.code}") from e
+    except (OSError, urllib.error.URLError):
+        log.debug("Daemon cancel unavailable, falling back to subprocess", exc_info=True)
+        return None
+
+
 def cancel_print(
     device_id: str,
     credentials: dict[str, str] | None = None,
@@ -550,9 +572,14 @@ def cancel_print(
     """Cancel the current print on a Bambu printer via cloud bridge.
 
     Either *credentials* (dict) or *credentials_path* (TOML file) must be given.
+    Uses the daemon HTTP API when available, otherwise falls back to subprocess.
 
     Returns the bridge response dict.
     """
+    daemon_result = _cancel_via_daemon(device_id)
+    if daemon_result is not None:
+        return daemon_result
+
     if credentials is None:
         credentials = load_credentials(credentials_path)
 
@@ -578,6 +605,66 @@ def cancel_print(
         )
 
 
+def _print_via_daemon(
+    threemf_path: Path,
+    device_id: str,
+    *,
+    project_name: str,
+    timeout: int,
+) -> dict | None:
+    """Try printing via the daemon HTTP API.  Returns dict or None.
+
+    The daemon handles AMS mapping, gcode stripping, and config patching
+    internally, so we just send the raw 3MF file.
+    """
+    if not _daemon_ping():
+        return None
+    import urllib.error
+    import urllib.request
+    import uuid
+
+    boundary = uuid.uuid4().hex
+    params = json.dumps(
+        {
+            "device_id": device_id,
+            "filename": threemf_path.name,
+            "project_name": project_name,
+        }
+    )
+    file_data = threemf_path.read_bytes()
+
+    body = (
+        (
+            f"--{boundary}\r\n"
+            f'Content-Disposition: form-data; name="params"\r\n'
+            f"Content-Type: application/json\r\n\r\n"
+            f"{params}\r\n"
+            f"--{boundary}\r\n"
+            f'Content-Disposition: form-data; name="file"; filename="{threemf_path.name}"\r\n'
+            f"Content-Type: application/octet-stream\r\n\r\n"
+        ).encode()
+        + file_data
+        + f"\r\n--{boundary}--\r\n".encode()
+    )
+
+    url = f"{DAEMON_URL}/print"
+    req = urllib.request.Request(
+        url,
+        data=body,
+        method="POST",
+        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout + 60) as resp:
+            return json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        body_text = e.read().decode(errors="replace")[:500]
+        raise RuntimeError(f"Daemon print failed: HTTP {e.code}: {body_text}") from e
+    except (OSError, urllib.error.URLError):
+        log.debug("Daemon print unavailable, falling back to subprocess", exc_info=True)
+        return None
+
+
 def cloud_print(
     threemf_path: Path,
     device_id: str,
@@ -593,8 +680,8 @@ def cloud_print(
     """Send a 3MF to a Bambu printer via cloud bridge.
 
     Either *credentials* (dict) or *credentials_path* (TOML file) must be given.
-    Automatically queries printer AMS state and builds proper mapping unless
-    *skip_ams_mapping* is True or *ams_trays* is provided.
+    Uses the daemon HTTP API when available (daemon handles AMS mapping
+    internally), otherwise falls back to subprocess.
 
     Args:
         ams_trays: Pre-queried AMS tray info (skips live status query if given).
@@ -602,6 +689,17 @@ def cloud_print(
 
     Returns the bridge response dict.
     """
+    # Use daemon when no manual AMS tray overrides are provided
+    if not skip_ams_mapping and not ams_trays:
+        daemon_result = _print_via_daemon(
+            threemf_path,
+            device_id,
+            project_name=project_name,
+            timeout=timeout,
+        )
+        if daemon_result is not None:
+            return daemon_result
+
     if credentials is None:
         credentials = load_credentials(credentials_path)
 

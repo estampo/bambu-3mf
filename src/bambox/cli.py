@@ -1143,9 +1143,20 @@ def start(
     credentials: Annotated[
         Optional[Path], typer.Option("-c", "--credentials", help="Path to credentials.toml")
     ] = None,
+    foreground: Annotated[
+        bool, typer.Option("--foreground", "-f", help="Run in foreground (blocking)")
+    ] = False,
 ) -> None:
     """Start the bridge daemon in the background."""
-    from bambox.bridge import _daemon_ping, _start_daemon, _write_token_json, load_credentials
+    import subprocess as sp
+
+    from bambox.bridge import (
+        _daemon_ping,
+        _find_local_bridge,
+        _start_daemon,
+        _write_token_json,
+        load_credentials,
+    )
 
     if _daemon_ping():
         ui.info("Daemon is already running")
@@ -1153,7 +1164,23 @@ def start(
 
     creds = load_credentials(credentials)
     token_file = _write_token_json(creds)
-    if _start_daemon(token_file, verbose=_verbose):
+
+    if foreground:
+        binary = _find_local_bridge()
+        if not binary:
+            ui.error("bambox-bridge binary not found")
+            sys.exit(1)
+        cmd = [binary]
+        if _verbose:
+            cmd.append("-v")
+        cmd.extend(["-c", str(token_file.resolve()), "daemon", "--port", "8765"])
+        ui.info("Starting daemon in foreground (Ctrl-C to stop)")
+        try:
+            result = sp.run(cmd)
+            sys.exit(result.returncode)
+        except KeyboardInterrupt:
+            ui.console.print()
+    elif _start_daemon(token_file, verbose=_verbose):
         ui.success("Daemon started")
     else:
         ui.error("Failed to start daemon")
