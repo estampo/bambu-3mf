@@ -139,6 +139,10 @@ extern "C" {
         ctx: *mut c_void,
     ) -> c_int;
 
+    // Symbol resolution diagnostics
+    pub fn bambu_shim_resolved_count() -> c_int;
+    pub fn bambu_shim_expected_count() -> c_int;
+
     // Print
     pub fn bambu_shim_start_print(
         agent: *mut c_void,

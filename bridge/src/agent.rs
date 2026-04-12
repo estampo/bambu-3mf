@@ -219,6 +219,17 @@ impl BambuAgent {
             return Err(format!("failed to load library: {err}"));
         }
 
+        // Log symbol resolution stats from the shim
+        let resolved = unsafe { ffi::bambu_shim_resolved_count() };
+        let expected = unsafe { ffi::bambu_shim_expected_count() };
+        if resolved < expected {
+            eprintln!(
+                "warning: shim resolved {resolved}/{expected} symbols — some features may be unavailable"
+            );
+        } else {
+            eprintln!("shim: resolved all {resolved}/{expected} symbols");
+        }
+
         // Set SSL cert env vars (same as C++ bridge) — needed for uploads
         if std::env::var("CURL_CA_BUNDLE").is_err() {
             std::env::set_var("CURL_CA_BUNDLE", "/etc/ssl/certs/ca-certificates.crt");

@@ -1,0 +1,1 @@
+Improve FFI safety in C++ shim: track symbol resolution counts, expand null-check validation to 11 critical function pointers, and log resolution diagnostics on load.
