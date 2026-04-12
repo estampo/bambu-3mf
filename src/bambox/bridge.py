@@ -457,7 +457,8 @@ def _daemon_ping() -> bool:
         req = urllib.request.Request(f"{DAEMON_URL}/ping", method="GET")
         with urllib.request.urlopen(req, timeout=2) as resp:
             return resp.status == 200
-    except Exception:
+    except (OSError, urllib.error.URLError):
+        log.debug("Daemon ping failed", exc_info=True)
         return False
 
 

@@ -9,12 +9,15 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import logging
 import re
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import IO
 from xml.sax.saxutils import escape as _xml_escape_base
+
+log = logging.getLogger(__name__)
 
 
 def xml_escape(value: str) -> str:
@@ -505,6 +508,7 @@ def repack_3mf(
                     size = 128 if "small" in fname else 512
                     thumbnail_overrides[fname] = gcode_thumbnail(gcode_str, size, size)
                 except Exception:
+                    log.debug("Thumbnail generation failed for %s", fname, exc_info=True)
                     thumbnail_overrides[fname] = _PLACEHOLDER_PNG
             else:
                 thumbnail_overrides[fname] = _PLACEHOLDER_PNG
@@ -645,7 +649,7 @@ def pack_gcode_3mf(
                         "Metadata/pick_1.png": main_png,
                     }
                 except Exception:
-                    pass  # fall back to placeholder
+                    log.debug("Thumbnail generation failed, using placeholders", exc_info=True)
             extra = extra_files or {}
             for path in [
                 "Metadata/plate_1.png",

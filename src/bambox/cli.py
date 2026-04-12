@@ -24,6 +24,8 @@ from bambox.cura import (
 from bambox.pack import FilamentInfo, SliceInfo, pack_gcode_3mf, repack_3mf
 from bambox.settings import available_filaments, available_machines, build_project_settings
 
+log = logging.getLogger(__name__)
+
 app = typer.Typer(
     name="bambox",
     help="Package and print G-code on Bambu Lab printers",
@@ -371,8 +373,8 @@ def _show_ams_mapping(threemf: Path, ams_trays: list[dict], mapping: list[int]) 
                     for f in plate_el.findall(f"{ns}filament"):
                         fid = int(f.get("id", "1"))
                         filaments[fid] = (f.get("type", "?"), f.get("color", "?"))
-    except Exception:
-        pass
+    except (OSError, KeyError, ET.ParseError):
+        log.debug("Failed to parse slice_info for AMS display", exc_info=True)
 
     tray_by_phys = {t["phys_slot"]: t for t in ams_trays}
 
