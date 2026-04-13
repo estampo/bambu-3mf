@@ -68,7 +68,7 @@ uv pip install bambox
 ```
 
 This is all you need for `pack`, `repack`, and `validate`. For `print`,
-`status`, and `login` you also need the bridge — see below.
+`status`, `login`, and `daemon` you also need the bridge — see below.
 
 ### Bridge Setup
 
@@ -94,16 +94,17 @@ This is the only option on Windows and Linux ARM64.
 | Feature | Linux x86_64 | Linux ARM64 | macOS | Windows |
 |---------|-------------|-------------|-------|---------|
 | `pack`, `repack`, `validate` | Yes | Yes | Yes | Yes |
-| `print`, `status`, `login` (native bridge) | Yes | No¹ | Yes | No |
-| `print`, `status`, `login` (Docker bridge) | Yes | Yes² | Yes | Yes |
+| `print`, `status`, `login` (native bridge) | Yes | No¹ | No² | No |
+| `print`, `status`, `login` (Docker bridge) | Yes | Yes³ | Yes | Yes |
 
 ¹ Bambu Lab does not ship a Linux ARM64 build of `libbambu_networking.so`.
-² Runs via QEMU emulation (amd64 image on ARM64 host).
+² macOS requires Docker — the native bridge is not supported on macOS.
+³ Runs via QEMU emulation (amd64 image on ARM64 host).
 
 ## CLI
 
 ```
-bambox [-V] [-v] {pack,repack,login,print,validate,status}
+bambox [-V] [-v] {pack,repack,login,print,validate,status,daemon}
 ```
 
 ### `bambox pack` — Package G-code
@@ -208,6 +209,7 @@ Options:
 | `--no-ams-mapping` | Skip AMS filament mapping |
 | `--ams-tray` | Manual tray spec: `SLOT:TYPE:COLOR` (repeatable) |
 | `-n, --dry-run` | Show print info without sending |
+| `-y, --yes` | Skip confirmation prompt |
 
 ### `bambox status` — Query printer
 
@@ -232,6 +234,35 @@ Options:
 | `-c, --credentials` | Path to `credentials.toml` |
 | `-w, --watch` | Continuously refresh status display |
 | `-i, --interval` | Seconds between refreshes (default: 10) |
+
+### `bambox daemon` — Manage bridge daemon
+
+Start, stop, and check the background bridge daemon used for fast printer
+status polling.
+
+```bash
+# Check if daemon is running
+bambox daemon status
+
+# Start daemon in background
+bambox daemon start
+
+# Start in foreground (blocking)
+bambox daemon start -f
+
+# Stop daemon
+bambox daemon stop
+
+# Restart daemon
+bambox daemon restart
+```
+
+Options (for `start`):
+
+| Flag | Description |
+|------|-------------|
+| `-c, --credentials` | Path to `credentials.toml` |
+| `-f, --foreground` | Run in foreground (blocking) |
 
 ### Global options
 
@@ -306,6 +337,8 @@ from bambox.validate import validate_3mf
 | `toolpath` | Synthetic toolpath generation for testing |
 | `credentials` | Credential loading and storage (`~/.config/estampo/credentials.toml`) |
 | `auth` | Bambu Cloud authentication |
+| `gcode_compat` | G-code rewriting for multi-filament compatibility |
+| `ui` | Rich console formatting, color swatches, interactive prompts |
 
 ## BBL `.gcode.3mf` Format
 
