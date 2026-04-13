@@ -514,7 +514,11 @@ async fn main() {
             restore_stdout();
 
             let agent_handle = handle::spawn_agent_thread(agent);
-            let state = server::AppState::new(agent_handle, printers.clone());
+            let state = server::AppState::new(
+                agent_handle,
+                printers.clone(),
+                cli.plugin_version.clone(),
+            );
             server::spawn_cache_updater(state.clone());
 
             // Pre-subscribe to all configured printers so the cache is warm

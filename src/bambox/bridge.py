@@ -32,6 +32,7 @@ def _xml_ns(root: ET.Element) -> str:
 
 
 DOCKER_IMAGE = "estampo/bambox-bridge:bambu-02.05.00.00"
+EXPECTED_API_VERSION = 1
 
 # ---------------------------------------------------------------------------
 # Credentials
@@ -462,6 +463,41 @@ def _daemon_ping() -> bool:
         return False
 
 
+def _check_daemon_version() -> None:
+    """Check bridge daemon version compatibility via /health endpoint.
+
+    Raises RuntimeError if the bridge API version is incompatible.
+    Logs a warning if the bridge version cannot be determined (old bridge).
+    """
+    import urllib.request
+
+    try:
+        req = urllib.request.Request(f"{DAEMON_URL}/health", method="GET")
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read())
+    except Exception:
+        log.warning("Could not query bridge version — skipping compatibility check")
+        return
+
+    api_version = data.get("api_version")
+    bridge_version = data.get("bridge_version", "unknown")
+
+    if api_version is None:
+        log.warning(
+            "Bridge daemon does not report api_version — "
+            "update with: pip install -U bambox  or  docker pull %s",
+            DOCKER_IMAGE,
+        )
+        return
+
+    if api_version != EXPECTED_API_VERSION:
+        raise RuntimeError(
+            f"Bridge API version mismatch: daemon reports v{api_version} "
+            f"(bridge {bridge_version}), but bambox expects v{EXPECTED_API_VERSION}. "
+            f"Update the bridge: pip install -U bambox  or  docker pull {DOCKER_IMAGE}"
+        )
+
+
 def _start_daemon(token_file: Path, *, verbose: bool = False) -> bool:
     """Start the bridge daemon in the background.  Returns True if started."""
     binary = _find_local_bridge()
@@ -494,9 +530,13 @@ def _start_daemon(token_file: Path, *, verbose: bool = False) -> bool:
 def _ensure_daemon(token_file: Path, *, verbose: bool = False) -> bool:
     """Ensure a daemon is running.  Returns True if available."""
     if _daemon_ping():
+        _check_daemon_version()
         return True
     log.info("No daemon running, starting one...")
-    return _start_daemon(token_file, verbose=verbose)
+    if _start_daemon(token_file, verbose=verbose):
+        _check_daemon_version()
+        return True
+    return False
 
 
 def query_status_daemon(device_id: str) -> dict:

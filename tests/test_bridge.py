@@ -13,7 +13,9 @@ from unittest.mock import patch
 import pytest
 
 from bambox.bridge import (
+    EXPECTED_API_VERSION,
     _build_ams_mapping,
+    _check_daemon_version,
     _cloud_print_impl,
     _find_local_bridge,
     _patch_config_3mf_colors,
@@ -666,3 +668,68 @@ class TestCloudPrintImpl:
         # Config 3mf should be cleaned up
         config_path = tmp_path / "test.gcode_config.3mf"
         assert not config_path.exists()
+
+
+# ---------------------------------------------------------------------------
+# _check_daemon_version
+# ---------------------------------------------------------------------------
+
+
+class TestCheckDaemonVersion:
+    def _mock_health(self, data: dict):
+        """Return a context manager that mocks urlopen to return *data* as JSON."""
+        import urllib.request
+
+        body = json.dumps(data).encode()
+
+        class FakeResp:
+            status = 200
+
+            def read(self):
+                return body
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                pass
+
+        return patch.object(urllib.request, "urlopen", return_value=FakeResp())
+
+    def test_compatible_version_passes(self):
+        health = {
+            "status": "ok",
+            "bridge_version": "0.4.0",
+            "api_version": EXPECTED_API_VERSION,
+            "plugin_version": "02.05.00.00",
+        }
+        with self._mock_health(health):
+            _check_daemon_version()
+
+    def test_incompatible_version_raises(self):
+        health = {
+            "status": "ok",
+            "bridge_version": "0.9.0",
+            "api_version": 999,
+            "plugin_version": "02.05.00.00",
+        }
+        with self._mock_health(health):
+            with pytest.raises(RuntimeError, match="Bridge API version mismatch"):
+                _check_daemon_version()
+
+    def test_missing_api_version_warns(self, caplog):
+        health = {"status": "ok"}
+        with self._mock_health(health):
+            import logging
+
+            with caplog.at_level(logging.WARNING, logger="bambox.bridge"):
+                _check_daemon_version()
+            assert "does not report api_version" in caplog.text
+
+    def test_unreachable_daemon_warns(self, caplog):
+        with patch("urllib.request.urlopen", side_effect=OSError("refused")):
+            import logging
+
+            with caplog.at_level(logging.WARNING, logger="bambox.bridge"):
+                _check_daemon_version()
+            assert "Could not query bridge version" in caplog.text
