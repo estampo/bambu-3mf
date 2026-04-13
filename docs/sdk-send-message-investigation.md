@@ -1,7 +1,13 @@
 # SDK `send_message` Investigation
 
 **Date:** 2026-04-12
-**Status:** Root cause identified; workaround planned
+**Status:** Partially superseded by [`signed-app-gate.md`](./signed-app-gate.md)
+(2026-04-13). The "missing cert/signing state" root-cause theory below is
+**incorrect**. The actual mechanism is an in-process host-binary signing
+check inside `libbambu_networking`; see the signed-app-gate document for
+the definitive evidence (`unsigned_studio` message from the SDK) and
+current status. The symptom-level findings below (which JSON payloads
+work, which do not) remain accurate.
 **Context:** Cancel/pause/resume commands for cloud-connected printers
 
 ## Problem

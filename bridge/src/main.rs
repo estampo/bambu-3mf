@@ -483,39 +483,18 @@ async fn main() {
             fast_exit(if result.return_code == 0 || result.return_code == -1 { 0 } else { 1 });
         }
         Command::Cancel { device_id } => {
-            suppress_stdout();
-            let creds = load_credentials(&creds_path);
-            let agent = init_agent(&lib_path, &creds);
-
-            // Subscribe to the device so we can send the stop command
-            if let Err(e) = agent.subscribe_and_pushall(&device_id, Duration::from_secs(10)) {
-                restore_stdout();
-                let err = serde_json::json!({"result": "error", "error": e});
-                println!("{}", serde_json::to_string(&err).unwrap());
-                fast_exit(1);
-            }
-
-            // Send the MQTT stop command (matches BambuStudio's command_task_abort)
-            let stop_cmd = r#"{"print":{"command":"stop","param":"","sequence_id":"0"}}"#;
-            let ret = match agent.send_message(&device_id, stop_cmd) {
-                Ok(r) => r,
-                Err(e) => {
-                    restore_stdout();
-                    let err = serde_json::json!({"result": "error", "error": e});
-                    println!("{}", serde_json::to_string(&err).unwrap());
-                    fast_exit(1);
-                }
-            };
-
-            restore_stdout();
-            let result = serde_json::json!({
+            // Disabled: libbambu_networking refuses to sign {"print":...} MQTT
+            // commands when the host binary is not an officially signed
+            // BambuStudio build, so cancel-from-CLI cannot currently reach the
+            // printer. See docs/signed-app-gate.md for the full investigation.
+            let err = serde_json::json!({
                 "command": "stop",
                 "device_id": device_id,
-                "result": if ret == 0 { "success" } else { "error" },
-                "send_result": ret,
+                "result": "error",
+                "error": "cancel is disabled: libbambu_networking rejects print commands from unsigned hosts (see docs/signed-app-gate.md)",
             });
-            println!("{}", serde_json::to_string(&result).unwrap());
-            fast_exit(if ret == 0 { 0 } else { 1 });
+            println!("{}", serde_json::to_string(&err).unwrap());
+            fast_exit(1);
         }
         Command::Watch { device_id } => {
             suppress_stdout();
