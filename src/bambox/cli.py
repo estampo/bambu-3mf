@@ -828,6 +828,9 @@ def print_cmd(
     dry_run: Annotated[
         bool, typer.Option("-n", "--dry-run", help="Show print info without sending")
     ] = False,
+    yes: Annotated[
+        bool, typer.Option("-y", "--yes", help="Skip AMS mapping confirmation prompt")
+    ] = False,
 ) -> None:
     """Send a .gcode.3mf to a Bambu printer via cloud bridge."""
     _warn_experimental()
@@ -903,6 +906,40 @@ def print_cmd(
                     pass
         ui.info("Dry run — not sending to printer.")
         return
+
+    # Pre-query AMS and confirm mapping unless --yes, --ams-tray, or --no-ams-mapping
+    explicit_trays = bool(ams_trays)
+    if not no_ams_mapping and not yes and not explicit_trays:
+        from bambox.bridge import (
+            _build_ams_mapping,
+            _write_token_json,
+            parse_ams_trays,
+            query_status,
+        )
+
+        token_file = _write_token_json(creds, directory=threemf.parent)
+        try:
+            try:
+                live_status = query_status(device_id, token_file, verbose=_verbose)
+                ams_trays = parse_ams_trays(live_status)
+            except Exception as e:
+                ui.warn(f"could not query AMS state: {e}")
+            if ams_trays:
+                try:
+                    ams_data = _build_ams_mapping(threemf, ams_trays)
+                    mapping = ams_data["amsMapping"]
+                    _show_ams_mapping(threemf, ams_trays, mapping)
+                    if not typer.confirm("Proceed with this mapping?", default=True):
+                        ui.info("Aborted.")
+                        return
+                except RuntimeError as e:
+                    ui.error(str(e))
+                    sys.exit(1)
+        finally:
+            try:
+                token_file.unlink()
+            except OSError:
+                pass
 
     ui.info(f"Sending {threemf.name} to {device_id}...")
     try:
