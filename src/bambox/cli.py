@@ -969,7 +969,7 @@ def print_cmd(
         sys.exit(1)
 
 
-@app.command()
+@app.command(hidden=True)
 def cancel(
     device: Annotated[str, typer.Option("-d", "--device", help="Printer serial number")] = "",
     printer: Annotated[
