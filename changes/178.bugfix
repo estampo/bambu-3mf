@@ -1,1 +1,0 @@
-Fix cloud print ``BAMBU_NETWORK_SIGNED_ERROR`` (-26) by correcting X-BBL HTTP headers: update Client-Version to match BambuStudio 02.05.00.66, use stable UUID Device-ID, and make OS-Type platform-aware.

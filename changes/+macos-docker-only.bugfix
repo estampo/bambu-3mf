@@ -1,1 +1,0 @@
-Fix cloud printing on macOS: use Docker-only mode (the macOS .dylib signing gate blocks start_print from unsigned hosts with -26).

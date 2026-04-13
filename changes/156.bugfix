@@ -1,1 +1,0 @@
-Fix credential env var mismatch: Rust bridge now uses ``BAMBOX_CREDENTIALS`` (was ``BAMBU_CREDENTIALS``), matching the Python side. Python also checks macOS ``~/Library/Application Support/`` paths to match the bridge's search behavior.

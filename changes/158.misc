@@ -1,1 +1,0 @@
-Improve exception handling: add debug logging to silent except blocks, narrow broad exception types, replace ``BaseException`` catch with ``try/finally`` in credential temp-file writing.

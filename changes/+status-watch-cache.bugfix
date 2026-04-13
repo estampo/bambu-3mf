@@ -1,1 +1,0 @@
-Fix ``status -w`` updating every ~9s instead of 1s when printer is idle.

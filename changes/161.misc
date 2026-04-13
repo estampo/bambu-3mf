@@ -1,1 +1,0 @@
-Extract shared test constants (``MINIMAL_GCODE``, ``MINIMAL_SLICE_INFO``, ``MINIMAL_SETTINGS``) and ``build_valid_3mf()`` into ``tests/conftest.py``, removing duplication between test_validate.py and test_release_readiness.py.

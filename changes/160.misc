@@ -1,1 +1,0 @@
-Move hardcoded P1S toolchange geometry coordinates from ``gcode_compat.py`` into the ``base_p1s.json`` machine profile, making them configurable per-machine.

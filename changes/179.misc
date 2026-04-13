@@ -1,1 +1,0 @@
-Consolidate BambuStudio version into single constants with format and consistency tests to prevent stale or fabricated version strings.

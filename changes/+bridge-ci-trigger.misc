@@ -1,1 +1,0 @@
-Build bridge binaries on push to main (not just PRs and tags) so ``install-dev.sh`` always picks up the latest.

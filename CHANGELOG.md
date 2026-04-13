@@ -5,6 +5,41 @@ This changelog is managed by [towncrier](https://towncrier.readthedocs.io/).
 
 <!-- towncrier release notes start -->
 
+## 0.4.1 — 2026-04-13
+
+### Features
+
+- Route ``print`` and ``cancel`` through daemon HTTP API when running, with subprocess fallback. Add ``--foreground`` flag to ``bambox daemon start``. ([#154](https://github.com/estampo/bambox/pull/154))
+- Add ``bambox daemon`` subcommands: ``start``, ``stop``, ``restart``, and ``status``.
+- Bridge version check: /health endpoint now reports bridge_version, api_version, and plugin_version; Python client validates API compatibility on daemon connect.
+- Support starting the bridge daemon via Docker on macOS (and when no local binary is available).
+
+### Bugfixes
+
+- Fix credential env var mismatch: Rust bridge now uses ``BAMBOX_CREDENTIALS`` (was ``BAMBU_CREDENTIALS``), matching the Python side. Python also checks macOS ``~/Library/Application Support/`` paths to match the bridge's search behavior. ([#156](https://github.com/estampo/bambox/pull/156))
+- Fix cloud print ``BAMBU_NETWORK_SIGNED_ERROR`` (-26) by correcting X-BBL HTTP headers: update Client-Version to match BambuStudio 02.05.00.66, use stable UUID Device-ID, and make OS-Type platform-aware. ([#178](https://github.com/estampo/bambox/pull/178))
+- Fix cancel/stop command: use QoS 1 and add missing ``param`` field to match BambuStudio's MQTT protocol. ([#180](https://github.com/estampo/bambox/pull/180))
+- Fix ``send_message`` FFI signature: add missing ``flag`` parameter, fixing cancel and other MQTT commands returning -2. ([#181](https://github.com/estampo/bambox/pull/181))
+- Daemon pre-subscribes to configured printers at startup so ``status -w`` returns instantly.
+- Fix ``status -w`` updating every ~9s instead of 1s when printer is idle.
+- Fix cloud printing on macOS: use Docker-only mode (the macOS .dylib signing gate blocks start_print from unsigned hosts with -26).
+
+### Misc
+
+- Consolidate duplicated ``MIN_SLOTS`` constant, array padding logic, and secure temp-file writing into single canonical implementations. ([#157](https://github.com/estampo/bambox/pull/157))
+- Improve exception handling: add debug logging to silent except blocks, narrow broad exception types, replace ``BaseException`` catch with ``try/finally`` in credential temp-file writing. ([#158](https://github.com/estampo/bambox/pull/158))
+- Replace duplicated Cura definition test fixtures with symlinks to the canonical source files in ``src/bambox/data/cura/``. ([#159](https://github.com/estampo/bambox/pull/159))
+- Move hardcoded P1S toolchange geometry coordinates from ``gcode_compat.py`` into the ``base_p1s.json`` machine profile, making them configurable per-machine. ([#160](https://github.com/estampo/bambox/pull/160))
+- Extract shared test constants (``MINIMAL_GCODE``, ``MINIMAL_SLICE_INFO``, ``MINIMAL_SETTINGS``) and ``build_valid_3mf()`` into ``tests/conftest.py``, removing duplication between test_validate.py and test_release_readiness.py. ([#161](https://github.com/estampo/bambox/pull/161))
+- Improve FFI safety in C++ shim: track symbol resolution counts, expand null-check validation to 11 critical function pointers, and log resolution diagnostics on load. ([#162](https://github.com/estampo/bambox/pull/162))
+- Consolidate BambuStudio version into single constants with format and consistency tests to prevent stale or fabricated version strings. ([#179](https://github.com/estampo/bambox/pull/179))
+- Add cloud printing research and send_message investigation docs ([#183](https://github.com/estampo/bambox/pull/183))
+- Document `libbambu_networking` signed-app gate and disable the CLI `cancel` subcommand. The SDK rejects `{"print":...}` MQTT commands when the hosting process is not an officially signed BambuStudio binary; see `docs/signed-app-gate.md` for the full investigation and evidence. The daemon `/cancel` endpoint is unchanged. ([#184](https://github.com/estampo/bambox/pull/184))
+- Add ``scripts/install-test.sh`` to install the latest dev build from TestPyPI.
+- Build bridge binaries on push to main (not just PRs and tags) so ``install-dev.sh`` always picks up the latest.
+- Document Linux ARM64 platform support: native bridge unavailable, Docker bridge via QEMU emulation.
+
+
 ## 0.4.0 — 2026-04-11
 
 ### Features

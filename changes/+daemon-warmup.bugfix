@@ -1,1 +1,0 @@
-Daemon pre-subscribes to configured printers at startup so ``status -w`` returns instantly.
