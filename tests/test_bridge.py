@@ -13,6 +13,8 @@ from unittest.mock import patch
 import pytest
 
 from bambox.bridge import (
+    DOCKER_DAEMON_CONTAINER,
+    DOCKER_IMAGE,
     EXPECTED_API_VERSION,
     _build_ams_mapping,
     _check_daemon_version,
@@ -20,6 +22,8 @@ from bambox.bridge import (
     _find_local_bridge,
     _patch_config_3mf_colors,
     _run_bridge_local,
+    _start_daemon_docker,
+    _stop_daemon_docker,
     _strip_gcode_from_3mf,
     _write_token_json,
     load_credentials,
@@ -746,3 +750,73 @@ class TestCheckDaemonVersion:
             with caplog.at_level(logging.WARNING, logger="bambox.bridge"):
                 _check_daemon_version()
             assert "Could not query bridge version" in caplog.text
+
+
+class TestStartDaemonDocker:
+    """Tests for _start_daemon_docker."""
+
+    def test_returns_false_when_docker_not_installed(self, tmp_path):
+        token = tmp_path / "creds.json"
+        token.write_text("{}")
+        with patch("bambox.bridge.subprocess.run", side_effect=FileNotFoundError):
+            assert _start_daemon_docker(token) is False
+
+    def test_returns_false_when_docker_info_times_out(self, tmp_path):
+        token = tmp_path / "creds.json"
+        token.write_text("{}")
+        with patch(
+            "bambox.bridge.subprocess.run",
+            side_effect=subprocess.TimeoutExpired(["docker", "info"], 10),
+        ):
+            assert _start_daemon_docker(token) is False
+
+    def test_returns_false_when_docker_not_running(self, tmp_path):
+        token = tmp_path / "creds.json"
+        token.write_text("{}")
+        failed = subprocess.CompletedProcess([], returncode=1, stderr="error")
+        with patch("bambox.bridge.subprocess.run", return_value=failed):
+            assert _start_daemon_docker(token) is False
+
+    def test_launches_container_on_success(self, tmp_path):
+        token = tmp_path / "creds.json"
+        token.write_text("{}")
+        ok = subprocess.CompletedProcess([], returncode=0, stdout="", stderr="")
+        calls: list[list[str]] = []
+
+        def fake_run(cmd, **kwargs):
+            calls.append(list(cmd))
+            return ok
+
+        with patch("bambox.bridge.subprocess.run", side_effect=fake_run):
+            assert _start_daemon_docker(token) is True
+        docker_run_cmd = calls[2]
+        assert "docker" in docker_run_cmd[0]
+        assert "-d" in docker_run_cmd
+        assert DOCKER_DAEMON_CONTAINER in docker_run_cmd
+        assert DOCKER_IMAGE in docker_run_cmd
+
+    def test_returns_false_on_docker_run_failure(self, tmp_path):
+        token = tmp_path / "creds.json"
+        token.write_text("{}")
+        ok = subprocess.CompletedProcess([], returncode=0, stdout="", stderr="")
+        fail = subprocess.CompletedProcess([], returncode=1, stdout="", stderr="fail")
+        results = iter([ok, ok, fail])
+
+        with patch("bambox.bridge.subprocess.run", side_effect=lambda *a, **kw: next(results)):
+            assert _start_daemon_docker(token) is False
+
+
+class TestStopDaemonDocker:
+    """Tests for _stop_daemon_docker."""
+
+    def test_calls_docker_rm(self):
+        calls: list[list[str]] = []
+        ok = subprocess.CompletedProcess([], returncode=0)
+
+        def fake_run(cmd, **kwargs):
+            calls.append(list(cmd))
+            return ok
+
+        with patch("bambox.bridge.subprocess.run", side_effect=fake_run):
+            _stop_daemon_docker()
+        assert calls[0] == ["docker", "rm", "-f", DOCKER_DAEMON_CONTAINER]

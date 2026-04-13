@@ -1128,13 +1128,14 @@ def stop() -> None:
     """Stop the bridge daemon."""
     import urllib.request
 
-    from bambox.bridge import DAEMON_URL
+    from bambox.bridge import DAEMON_URL, _stop_daemon_docker
 
     try:
         req = urllib.request.Request(f"{DAEMON_URL}/shutdown", method="POST")
         urllib.request.urlopen(req, timeout=5)
     except (OSError, Exception):
         pass
+    _stop_daemon_docker()
     ui.success("Daemon stopped")
 
 
@@ -1151,6 +1152,8 @@ def start(
     import subprocess as sp
 
     from bambox.bridge import (
+        DOCKER_DAEMON_CONTAINER,
+        DOCKER_IMAGE,
         _daemon_ping,
         _find_local_bridge,
         _start_daemon,
@@ -1167,19 +1170,44 @@ def start(
 
     if foreground:
         binary = _find_local_bridge()
-        if not binary:
-            ui.error("bambox-bridge binary not found")
-            sys.exit(1)
-        cmd = [binary]
-        if _verbose:
-            cmd.append("-v")
-        cmd.extend(["-c", str(token_file.resolve()), "daemon", "--port", "8765"])
-        ui.info("Starting daemon in foreground (Ctrl-C to stop)")
-        try:
-            result = sp.run(cmd)
-            sys.exit(result.returncode)
-        except KeyboardInterrupt:
-            ui.console.print()
+        if binary:
+            cmd = [binary]
+            if _verbose:
+                cmd.append("-v")
+            cmd.extend(["-c", str(token_file.resolve()), "daemon", "--port", "8765"])
+            ui.info("Starting daemon in foreground (Ctrl-C to stop)")
+            try:
+                result = sp.run(cmd)
+                sys.exit(result.returncode)
+            except KeyboardInterrupt:
+                ui.console.print()
+        else:
+            token_real = str(token_file.resolve())
+            cmd = [
+                "docker",
+                "run",
+                "--rm",
+                "--name",
+                DOCKER_DAEMON_CONTAINER,
+                "--platform",
+                "linux/amd64",
+                "-p",
+                "8765:8765",
+                "-v",
+                f"{token_real}:/tmp/credentials.json:ro",
+                DOCKER_IMAGE,
+                "-c",
+                "/tmp/credentials.json",
+            ]
+            if _verbose:
+                cmd.append("-v")
+            cmd.extend(["daemon", "--port", "8765", "--bind", "0.0.0.0"])
+            ui.info("Starting daemon in foreground via Docker (Ctrl-C to stop)")
+            try:
+                result = sp.run(cmd)
+                sys.exit(result.returncode)
+            except KeyboardInterrupt:
+                ui.console.print()
     elif _start_daemon(token_file, verbose=_verbose):
         ui.success("Daemon started")
     else:
@@ -1196,7 +1224,13 @@ def restart(
     """Restart the bridge daemon."""
     import urllib.request
 
-    from bambox.bridge import DAEMON_URL, _start_daemon, _write_token_json, load_credentials
+    from bambox.bridge import (
+        DAEMON_URL,
+        _start_daemon,
+        _stop_daemon_docker,
+        _write_token_json,
+        load_credentials,
+    )
 
     # Stop if running
     try:
@@ -1204,6 +1238,7 @@ def restart(
         urllib.request.urlopen(req, timeout=5)
     except (OSError, Exception):
         pass
+    _stop_daemon_docker()
     time.sleep(1)
 
     creds = load_credentials(credentials)

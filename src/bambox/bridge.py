@@ -509,24 +509,28 @@ def _check_daemon_version() -> None:
 
 
 def _start_daemon(token_file: Path, *, verbose: bool = False) -> bool:
-    """Start the bridge daemon in the background.  Returns True if started."""
+    """Start the bridge daemon in the background.  Returns True if started.
+
+    Tries local binary first, falls back to Docker on macOS or when no
+    local binary is available.
+    """
     binary = _find_local_bridge()
-    if not binary:
-        return False
+    if binary:
+        cmd = [binary]
+        if verbose:
+            cmd.append("-v")
+        cmd.extend(["-c", str(token_file.resolve()), "daemon", "--port", "8765"])
+        log.debug("Starting daemon: %s", " ".join(cmd))
+        subprocess.Popen(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    else:
+        if not _start_daemon_docker(token_file, verbose=verbose):
+            return False
 
-    cmd = [binary]
-    if verbose:
-        cmd.append("-v")
-    cmd.extend(["-c", str(token_file.resolve()), "daemon", "--port", "8765"])
-    log.debug("Starting daemon: %s", " ".join(cmd))
-    subprocess.Popen(
-        cmd,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
-    )
-
-    # Wait for it to become responsive
     import time
 
     for _ in range(30):
@@ -537,17 +541,74 @@ def _start_daemon(token_file: Path, *, verbose: bool = False) -> bool:
     return False
 
 
+DOCKER_DAEMON_CONTAINER = "bambox-bridge-daemon"
+
+
+def _start_daemon_docker(token_file: Path, *, verbose: bool = False) -> bool:
+    """Start the bridge daemon as a Docker container."""
+    try:
+        docker_info = subprocess.run(["docker", "info"], capture_output=True, timeout=10)
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        log.warning("Docker not available — cannot start daemon")
+        return False
+    if docker_info.returncode != 0:
+        log.warning("Docker not running — cannot start daemon")
+        return False
+
+    subprocess.run(
+        ["docker", "rm", "-f", DOCKER_DAEMON_CONTAINER],
+        capture_output=True,
+        timeout=10,
+    )
+
+    token_real = str(token_file.resolve())
+    cmd = [
+        "docker",
+        "run",
+        "-d",
+        "--name",
+        DOCKER_DAEMON_CONTAINER,
+        "--platform",
+        "linux/amd64",
+        "-p",
+        "8765:8765",
+        "-v",
+        f"{token_real}:/tmp/credentials.json:ro",
+        DOCKER_IMAGE,
+        "-c",
+        "/tmp/credentials.json",
+    ]
+    if verbose:
+        cmd.append("-v")
+    cmd.extend(["daemon", "--port", "8765", "--bind", "0.0.0.0"])
+    log.debug("Starting daemon (docker): %s", " ".join(cmd))
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    if result.returncode != 0:
+        log.warning("Docker daemon start failed: %s", result.stderr.strip())
+        return False
+    return True
+
+
+def _stop_daemon_docker() -> None:
+    """Stop the Docker daemon container if running."""
+    try:
+        subprocess.run(
+            ["docker", "rm", "-f", DOCKER_DAEMON_CONTAINER],
+            capture_output=True,
+            timeout=10,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
+
+
 def _ensure_daemon(token_file: Path, *, verbose: bool = False) -> bool:
     """Ensure a daemon is running.  Returns True if available.
 
-    On macOS, checks for an existing daemon (e.g. running via Docker)
-    but will not auto-start a local binary (blocked by signed-app gate).
+    On macOS, starts the daemon via Docker. On Linux, uses the local binary.
     """
     if _daemon_ping():
         _check_daemon_version()
         return True
-    if _IS_MACOS:
-        return False
     log.info("No daemon running, starting one...")
     if _start_daemon(token_file, verbose=verbose):
         _check_daemon_version()
