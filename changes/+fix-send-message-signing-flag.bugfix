@@ -1,0 +1,1 @@
+Fix cloud printing -26 error: set send_message signing flag to 1 (was incorrectly set to 0, disabling request signing).

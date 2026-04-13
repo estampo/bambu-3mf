@@ -294,8 +294,10 @@ int bambu_shim_start_subscribe(void* agent, const char* module) {
 
 int bambu_shim_send_message(void* agent, const char* dev_id, const char* json, int qos) {
     if (!fp_send_msg) return -1;
-    // flag=0 (no signing/encryption) — matches BambuStudio's default
-    return fp_send_msg(agent, std::string(dev_id), std::string(json), qos, 0);
+    // flag=1: enable request signing — the .so requires this for cloud operations
+    // that interact with the print pipeline. flag=0 silently disables signing,
+    // causing start_print to fail with -26 (BAMBU_NETWORK_SIGNED_ERROR).
+    return fp_send_msg(agent, std::string(dev_id), std::string(json), qos, 1);
 }
 
 int bambu_shim_send_message_to_printer(
