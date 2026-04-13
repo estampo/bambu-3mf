@@ -25,6 +25,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::handle::AgentHandle;
 
+pub const API_VERSION: u32 = 1;
+
 // ---------------------------------------------------------------------------
 // Shared state
 // ---------------------------------------------------------------------------
@@ -55,12 +57,18 @@ pub struct AppState {
     pub printers: Vec<PrinterEntry>,
     /// When the daemon started.
     pub started_at: Instant,
+    /// Bambu plugin version (e.g. "02.05.00.00").
+    pub plugin_version: String,
 }
 
 pub type SharedState = Arc<AppState>;
 
 impl AppState {
-    pub fn new(handle: AgentHandle, printers: Vec<(String, String)>) -> SharedState {
+    pub fn new(
+        handle: AgentHandle,
+        printers: Vec<(String, String)>,
+        plugin_version: String,
+    ) -> SharedState {
         Arc::new(Self {
             handle,
             cache: RwLock::new(HashMap::new()),
@@ -70,6 +78,7 @@ impl AppState {
                 .map(|(name, serial)| PrinterEntry { name, serial })
                 .collect(),
             started_at: Instant::now(),
+            plugin_version,
         })
     }
 }
@@ -85,6 +94,9 @@ pub struct HealthResponse {
     pub mqtt_connected: bool,
     pub uptime_secs: u64,
     pub cached_devices: Vec<String>,
+    pub bridge_version: String,
+    pub api_version: u32,
+    pub plugin_version: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -146,6 +158,9 @@ async fn health(State(state): State<SharedState>) -> Json<HealthResponse> {
         mqtt_connected,
         uptime_secs: state.started_at.elapsed().as_secs(),
         cached_devices,
+        bridge_version: env!("CARGO_PKG_VERSION").into(),
+        api_version: API_VERSION,
+        plugin_version: state.plugin_version.clone(),
     })
 }
 
@@ -690,6 +705,7 @@ pub fn mock_state_with_printers(
             .map(|(name, serial)| PrinterEntry { name, serial })
             .collect(),
         started_at: Instant::now(),
+        plugin_version: "02.05.00.00".into(),
     });
     state
 }
@@ -764,6 +780,9 @@ mod tests {
         assert_eq!(body.status, "ok");
         assert!(!body.mqtt_connected);
         assert!(body.cached_devices.is_empty());
+        assert_eq!(body.bridge_version, env!("CARGO_PKG_VERSION"));
+        assert_eq!(body.api_version, API_VERSION);
+        assert_eq!(body.plugin_version, "02.05.00.00");
     }
 
     #[tokio::test]
