@@ -548,8 +548,8 @@ def _start_daemon_docker(token_file: Path, *, verbose: bool = False) -> bool:
     """Start the bridge daemon as a Docker container."""
     try:
         docker_info = subprocess.run(["docker", "info"], capture_output=True, timeout=10)
-    except FileNotFoundError:
-        log.warning("Docker not installed — cannot start daemon")
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        log.warning("Docker not available — cannot start daemon")
         return False
     if docker_info.returncode != 0:
         log.warning("Docker not running — cannot start daemon")
@@ -591,11 +591,14 @@ def _start_daemon_docker(token_file: Path, *, verbose: bool = False) -> bool:
 
 def _stop_daemon_docker() -> None:
     """Stop the Docker daemon container if running."""
-    subprocess.run(
-        ["docker", "rm", "-f", DOCKER_DAEMON_CONTAINER],
-        capture_output=True,
-        timeout=10,
-    )
+    try:
+        subprocess.run(
+            ["docker", "rm", "-f", DOCKER_DAEMON_CONTAINER],
+            capture_output=True,
+            timeout=10,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
 
 
 def _ensure_daemon(token_file: Path, *, verbose: bool = False) -> bool:

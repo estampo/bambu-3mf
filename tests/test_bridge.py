@@ -761,6 +761,15 @@ class TestStartDaemonDocker:
         with patch("bambox.bridge.subprocess.run", side_effect=FileNotFoundError):
             assert _start_daemon_docker(token) is False
 
+    def test_returns_false_when_docker_info_times_out(self, tmp_path):
+        token = tmp_path / "creds.json"
+        token.write_text("{}")
+        with patch(
+            "bambox.bridge.subprocess.run",
+            side_effect=subprocess.TimeoutExpired(["docker", "info"], 10),
+        ):
+            assert _start_daemon_docker(token) is False
+
     def test_returns_false_when_docker_not_running(self, tmp_path):
         token = tmp_path / "creds.json"
         token.write_text("{}")
