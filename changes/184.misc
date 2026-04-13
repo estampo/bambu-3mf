@@ -1,0 +1,1 @@
+Document `libbambu_networking` signed-app gate and disable the CLI `cancel` subcommand. The SDK rejects `{"print":...}` MQTT commands when the hosting process is not an officially signed BambuStudio binary; see `docs/signed-app-gate.md` for the full investigation and evidence. The daemon `/cancel` endpoint is unchanged.
