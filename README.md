@@ -12,6 +12,38 @@
 
 Package plain G-code into Bambu Lab `.gcode.3mf` files — no OrcaSlicer required.
 
+## Known limitations
+
+Read these before pointing bambox at a real printer. None of them are going
+away in the very near term.
+
+- **Only the Bambu P1S with AMS is tested.** The architecture is general and
+  other Bambu models (X1C, A1, A1 Mini) can be added by dropping in machine
+  profiles, but we don't have the hardware in the loop to validate them.
+  If you have one of those printers and want to help test, please
+  [open an issue](https://github.com/estampo/bambox/issues/new) — see also
+  the [roadmap](ROADMAP.md#future).
+- **`bambox cancel` (CLI) is disabled.** `libbambu_networking` rejects
+  print-class MQTT commands (stop, pause, resume, skip_objects) when the
+  hosting process is not an officially signed BambuStudio binary. The CLI
+  returns a structured error pointing at
+  [`docs/signed-app-gate.md`](docs/signed-app-gate.md), which has the full
+  investigation. The daemon `/cancel` endpoint is unaffected because it
+  also handles in-flight upload cancellation, which still works.
+- **macOS always uses the Docker bridge.** The native `bambox-bridge`
+  binary hits the same code-signing gate on macOS and cannot send
+  `start_print` — bambox detects macOS and forces the Docker path, so
+  Docker Desktop (or a compatible runtime) must be installed and running
+  for `print`, `status`, `login`, and `daemon`.
+- **No LAN mode.** Cloud connectivity to Bambu's servers is required for
+  every bridged operation. LAN-direct support is tracked in
+  [#91](https://github.com/estampo/bambox/issues/91).
+- **No Windows native bridge.** Windows users need Docker Desktop for any
+  bridged command; Linux ARM64 users need Docker + QEMU.
+- **PyPI publish is manual for v0.4.1.** The release workflow silently
+  no-op'd on the v0.4.1 merge (now [fixed](https://github.com/estampo/bambox/pull/198)).
+  If `pip install bambox` gives you 0.4.0, that's why.
+
 `bambox` is a standalone Python library and CLI for creating printer-ready
 Bambu Lab archives from any G-code source. It handles the BBL-specific
 packaging format (metadata, checksums, settings) so that any slicer —
@@ -75,19 +107,22 @@ This is all you need for `pack`, `repack`, and `validate`. For `print`,
 The `print`, `status`, and `login` commands communicate with Bambu printers
 via a cloud bridge. You have two options:
 
-**Option A — Native binary (recommended, Linux x86_64 and macOS):**
+**Option A — Native binary (Linux x86_64 only):**
 
 ```bash
 curl -fsSL https://github.com/estampo/bambox/releases/latest/download/install.sh | sh
 ```
 
-This installs `bambox-bridge` to `~/.local/bin`.
+This installs `bambox-bridge` to `~/.local/bin`. macOS, Windows, and Linux
+ARM64 users should use Option B.
 
-**Option B — Docker (all platforms):**
+**Option B — Docker (all other platforms):**
 
 If you have Docker installed and running, bambox uses the
 `estampo/bambox-bridge` image automatically — no extra setup needed.
-This is the only option on Windows and Linux ARM64.
+This is the **only** supported option on macOS, Windows, and Linux ARM64.
+See [Known limitations](#known-limitations) for why macOS cannot use the
+native binary.
 
 ### Platform Support
 

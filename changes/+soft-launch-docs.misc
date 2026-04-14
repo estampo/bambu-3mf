@@ -1,0 +1,1 @@
+Rewrite ROADMAP.md to reflect shipped v0.2–v0.4.1 and mark multi-printer support as contributor-gated future work. Add Known limitations section to README covering cancel being disabled, macOS Docker-only, P1S-only testing, and missing LAN / Windows-native support.
