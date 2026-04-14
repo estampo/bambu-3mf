@@ -16,10 +16,9 @@ from rich.markup import escape
 from bambox import ui
 from bambox.cura import (
     PRINTER_MODEL_IDS,
-    build_template_context,
+    assemble_cura_gcode,
     extract_slice_stats,
     parse_bambox_headers,
-    strip_bambox_header,
 )
 from bambox.pack import FilamentInfo, SliceInfo, pack_gcode_3mf, repack_3mf
 from bambox.settings import available_filaments, available_machines, build_project_settings
@@ -613,20 +612,9 @@ def pack(
 
     # If BAMBOX_ASSEMBLE=true, render start/end templates and wrap toolpath
     if headers.get("ASSEMBLE") == "true":
-        from bambox.assemble import assemble_gcode
-        from bambox.gcode_compat import rewrite_tool_changes
-        from bambox.templates import render_template
-
-        toolpath = strip_bambox_header(gcode_str)
-
-        if len(filament_types) > 1:
-            toolpath = rewrite_tool_changes(toolpath, project_settings, machine)
-
-        ctx = build_template_context(headers, project_settings, toolpath=toolpath)
-
-        start = render_template(f"{machine}_start.gcode.j2", ctx)
-        end = render_template(f"{machine}_end.gcode.j2", ctx)
-        gcode_bytes = assemble_gcode(start, toolpath, end).encode()
+        gcode_bytes = assemble_cura_gcode(
+            gcode_str, project_settings, machine, filament_types, headers
+        )
         if headers:
             ui.info(f"Auto-configured from BAMBOX headers: {machine}, {filament_types}")
 
