@@ -1,9 +1,22 @@
 """CuraEngine integration: printer definitions and BAMBOX header parsing.
 
-Provides bundled CuraEngine printer definitions with BAMBOX header comments
-that bambox reads to auto-configure packaging. The header contract lets
-CuraEngine output carry machine-readable metadata without coupling the
-slicer to Bambu Lab specifics.
+CuraEngine (5.x+) handles slicing and resolves ``{variable}`` placeholders in
+machine_start_gcode via its built-in ``GcodeTemplateResolver``.  bambox uses
+this to emit BAMBOX header comments with concrete values (bed temp, nozzle
+temp, etc.) directly from the slicer output.
+
+However, bambox still performs post-processing that CuraEngine cannot handle:
+
+- **max_layer_z**: a post-slice value derived from the actual toolpath
+  (not available as a CuraEngine variable; see Cura issue #4143).
+- **first_layer_print_min / first_layer_print_size**: also post-slice values
+  computed from layer 0 extrusion moves for adaptive bed leveling.
+- **M620/M621 AMS toolchange wrapping**: Bambu firmware requires AMS slot
+  select/deselect commands around each tool change.  These cannot be expressed
+  in CuraEngine's extruder start/end code hooks because they must wrap the
+  entire tool-change sequence including priming.
+- **Start/end G-code assembly**: the full Bambu startup and shutdown sequences
+  are Jinja2 templates rendered by bambox (see ``assemble.py``).
 
 Header format (emitted as G-code comments by the printer definition)::
 
@@ -83,11 +96,14 @@ def parse_bambox_headers(gcode: str) -> dict[str, str]:
     Multi-value keys like ``BAMBOX_FILAMENT_TYPE`` appearing multiple times
     are collected into comma-separated values.
 
-    CuraEngine CLI does not substitute ``{variable}`` placeholders in
-    machine_start_gcode.  Values containing ``{`` are treated as
-    unresolved and discarded.  For machine-level headers (BED_TEMP,
-    NOZZLE_TEMP, etc.) the values are inferred from actual G-code
-    commands (M140/M104) via :func:`_resolve_unsubstituted_headers`.
+    Modern CuraEngine (5.x+) resolves ``{variable}`` placeholders in
+    machine_start_gcode via ``GcodeTemplateResolver``, so BAMBOX headers
+    normally contain concrete values.  Values still containing ``{``
+    (e.g. from older CuraEngine builds that lack template resolution) are
+    treated as unresolved and discarded.  For machine-level headers
+    (BED_TEMP, NOZZLE_TEMP, etc.) the values are then inferred from
+    actual G-code commands (M140/M104) via
+    :func:`_resolve_unsubstituted_headers` as a fallback.
     """
     # Per-extruder keys that may appear anywhere in the file
     _FULL_SCAN_KEYS = {"FILAMENT_SLOT", "FILAMENT_TYPE"}
@@ -166,9 +182,11 @@ def parse_bambox_headers(gcode: str) -> dict[str, str]:
 def _resolve_unsubstituted_headers(gcode: str, headers: dict[str, str]) -> None:
     """Infer missing header values from actual G-code commands.
 
-    CuraEngine CLI does not substitute ``{variable}`` in start gcode,
-    so BED_TEMP, NOZZLE_TEMP, and NOZZLE_DIAMETER may be missing.
-    This scans the first 50 lines for M140/M104 to fill them in.
+    Modern CuraEngine (5.x+) resolves ``{variable}`` placeholders, so
+    BED_TEMP, NOZZLE_TEMP, etc. are normally present in the headers.
+    This fallback handles older CuraEngine versions that do not perform
+    template substitution — it scans the first ~3 KB for M140/M104
+    commands to fill in missing values.
     """
     if "BED_TEMP" not in headers:
         m = re.search(r"M140 S(\d+)", gcode[:3000])
@@ -502,3 +520,42 @@ def extract_slice_stats(gcode: str, flush_volume_mm3: float = 280.0) -> SliceSta
             stats.prediction += n_purges * _PURGE_TIME_SECS
 
     return stats
+
+
+# ---------------------------------------------------------------------------
+# High-level G-code assembly
+# ---------------------------------------------------------------------------
+
+
+def assemble_cura_gcode(
+    gcode_str: str,
+    project_settings: dict[str, object],
+    machine: str,
+    filament_types: list[str],
+    headers: dict[str, str],
+) -> bytes:
+    """Assemble raw CuraEngine G-code into Bambu-ready output.
+
+    Takes CuraEngine G-code with ``BAMBOX_ASSEMBLE=true`` headers and:
+
+    1. Strips the BAMBOX header block.
+    2. Rewrites tool-change sequences for multi-filament prints.
+    3. Renders machine-specific start/end G-code templates.
+    4. Assembles start + toolpath + end into final G-code.
+
+    Returns the assembled G-code as UTF-8 bytes ready for 3MF packaging.
+    """
+    from bambox.assemble import assemble_gcode
+    from bambox.gcode_compat import rewrite_tool_changes
+    from bambox.templates import render_template
+
+    toolpath = strip_bambox_header(gcode_str)
+
+    if len(filament_types) > 1:
+        toolpath = rewrite_tool_changes(toolpath, project_settings, machine)
+
+    ctx = build_template_context(headers, project_settings, toolpath=toolpath)
+
+    start = render_template(f"{machine}_start.gcode.j2", ctx)
+    end = render_template(f"{machine}_end.gcode.j2", ctx)
+    return assemble_gcode(start, toolpath, end).encode()
