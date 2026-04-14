@@ -12,9 +12,23 @@ from bambox.cura import (
     build_template_context,
     cura_definitions_dir,
     extract_slice_stats,
+    max_layer_z,
     parse_bambox_headers,
     strip_bambox_header,
 )
+
+
+class TestMaxLayerZ:
+    def test_returns_highest_z(self) -> None:
+        gcode = "G0 Z0.3\nG1 X10 Y10 E1\nG0 Z5.0\nG1 X20 Y20 E2\nG0 Z10.0\nG1 X30 Y30 E3\n"
+        assert max_layer_z(gcode) == 10.0
+
+    def test_returns_none_for_no_z_moves(self) -> None:
+        assert max_layer_z("G1 X10 Y10 E1\n") is None
+
+    def test_handles_z_in_g1(self) -> None:
+        gcode = "G1 Z0.4 F600\nG1 Z7.2 F600\n"
+        assert max_layer_z(gcode) == 7.2
 
 
 class TestCuraDefinitions:

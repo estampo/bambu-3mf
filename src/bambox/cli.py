@@ -622,14 +622,7 @@ def pack(
         if len(filament_types) > 1:
             toolpath = rewrite_tool_changes(toolpath, project_settings, machine)
 
-        ctx = build_template_context(headers, project_settings)
-
-        from bambox.cura import first_layer_bbox
-
-        bbox = first_layer_bbox(toolpath)
-        if bbox:
-            ctx["first_layer_print_min"] = bbox[0]
-            ctx["first_layer_print_size"] = bbox[1]
+        ctx = build_template_context(headers, project_settings, toolpath=toolpath)
 
         start = render_template(f"{machine}_start.gcode.j2", ctx)
         end = render_template(f"{machine}_end.gcode.j2", ctx)

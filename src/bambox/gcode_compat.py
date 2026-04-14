@@ -335,6 +335,9 @@ def rewrite_tool_changes(
         if z > max_z:
             max_z = z
 
+    if max_z == 0.0:
+        log.warning("No Z moves found in toolpath; max_layer_z=0 may cause unsafe moves")
+
     # Detect initial extruder: if the first T command appears before any
     # extrusion move (G1 ... E), it's an extruder select, not a tool change.
     first_extrusion = re.search(r"G1\s.*E[\d.]", toolpath)

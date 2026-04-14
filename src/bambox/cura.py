@@ -214,12 +214,16 @@ def strip_bambox_header(gcode: str) -> str:
 def build_template_context(
     headers: dict[str, str],
     project_settings: dict[str, object],
+    toolpath: str | None = None,
 ) -> dict[str, object]:
     """Build a Jinja2 template context from BAMBOX headers + project_settings.
 
     Combines header values (concrete temps from CuraEngine) with the full
     project_settings blob (which contains per-filament arrays). Header values
     take precedence for the keys they specify.
+
+    When *toolpath* is provided, ``max_layer_z`` and ``first_layer_print_*``
+    are derived from actual G-code moves instead of using fallback defaults.
     """
     ctx: dict[str, object] = {}
 
@@ -276,6 +280,16 @@ def build_template_context(
         raw = headers["BED_TYPE"]
         ctx["curr_bed_type"] = _BED_TYPE_DISPLAY.get(raw, raw)
 
+    # Derive values from toolpath when available
+    if toolpath is not None:
+        mz = max_layer_z(toolpath)
+        if mz is not None:
+            ctx["max_layer_z"] = mz
+        bbox = first_layer_bbox(toolpath)
+        if bbox:
+            ctx["first_layer_print_min"] = bbox[0]
+            ctx["first_layer_print_size"] = bbox[1]
+
     # Defaults needed by templates
     ctx.setdefault("initial_extruder", 0)
     ctx.setdefault("max_layer_z", 0.4)
@@ -286,12 +300,29 @@ def build_template_context(
     ctx.setdefault("nozzle_temperature_range_high", [240])
     ctx.setdefault("filament_area", _FILAMENT_AREA)
 
+    # Pad single-element array defaults to match extruder count
+    extruder_count = int(headers.get("EXTRUDERS", 1))
+    for key in ("filament_max_volumetric_speed", "nozzle_temperature_range_high"):
+        val = ctx[key]
+        if isinstance(val, list) and len(val) < extruder_count:
+            ctx[key] = val + [val[-1]] * (extruder_count - len(val))
+
     return ctx
 
 
 # ---------------------------------------------------------------------------
 # First-layer bounding box (for adaptive bed leveling)
 # ---------------------------------------------------------------------------
+
+
+def max_layer_z(gcode: str) -> float | None:
+    """Return the highest Z coordinate from G0/G1 moves, or ``None``."""
+    best: float | None = None
+    for m in re.finditer(r"G[01]\s.*?Z([\d.]+)", gcode):
+        z = float(m.group(1))
+        if best is None or z > best:
+            best = z
+    return best
 
 
 def first_layer_bbox(gcode: str) -> tuple[list[float], list[float]] | None:
