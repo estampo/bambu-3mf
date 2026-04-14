@@ -1,1 +1,0 @@
-Release workflow now detects squash-merged release PRs by querying the PR by number, surviving auto-deleted head branches.

@@ -1,1 +1,0 @@
-Sync uv.lock with pyproject.toml — the lockfile had bambox at 0.3.0 while the project was at 0.4.1.

@@ -5,6 +5,23 @@ This changelog is managed by [towncrier](https://towncrier.readthedocs.io/).
 
 <!-- towncrier release notes start -->
 
+## 0.4.2 — 2026-04-14
+
+### Features
+
+- Ask for user confirmation of AMS tray mapping before sending a print; skip with ``--yes`` / ``-y``
+
+### Bugfixes
+
+- Release workflow now detects squash-merged release PRs by querying the PR by number, surviving auto-deleted head branches.
+
+### Misc
+
+- Rewrite ROADMAP.md to reflect shipped v0.2–v0.4.1 and mark multi-printer support as contributor-gated future work. Add Known limitations section to README covering cancel being disabled, macOS Docker-only, P1S-only testing, and missing LAN / Windows-native support.
+- Sync uv.lock with pyproject.toml — the lockfile had bambox at 0.3.0 while the project was at 0.4.1.
+- Update README: add daemon commands, fix macOS platform support, add missing modules, hide broken cancel command.
+
+
 ## 0.4.1 — 2026-04-13
 
 ### Features
