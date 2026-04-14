@@ -502,3 +502,42 @@ def extract_slice_stats(gcode: str, flush_volume_mm3: float = 280.0) -> SliceSta
             stats.prediction += n_purges * _PURGE_TIME_SECS
 
     return stats
+
+
+# ---------------------------------------------------------------------------
+# High-level G-code assembly
+# ---------------------------------------------------------------------------
+
+
+def assemble_cura_gcode(
+    gcode_str: str,
+    project_settings: dict[str, object],
+    machine: str,
+    filament_types: list[str],
+    headers: dict[str, str],
+) -> bytes:
+    """Assemble raw CuraEngine G-code into Bambu-ready output.
+
+    Takes CuraEngine G-code with ``BAMBOX_ASSEMBLE=true`` headers and:
+
+    1. Strips the BAMBOX header block.
+    2. Rewrites tool-change sequences for multi-filament prints.
+    3. Renders machine-specific start/end G-code templates.
+    4. Assembles start + toolpath + end into final G-code.
+
+    Returns the assembled G-code as UTF-8 bytes ready for 3MF packaging.
+    """
+    from bambox.assemble import assemble_gcode
+    from bambox.gcode_compat import rewrite_tool_changes
+    from bambox.templates import render_template
+
+    toolpath = strip_bambox_header(gcode_str)
+
+    if len(filament_types) > 1:
+        toolpath = rewrite_tool_changes(toolpath, project_settings, machine)
+
+    ctx = build_template_context(headers, project_settings, toolpath=toolpath)
+
+    start = render_template(f"{machine}_start.gcode.j2", ctx)
+    end = render_template(f"{machine}_end.gcode.j2", ctx)
+    return assemble_gcode(start, toolpath, end).encode()

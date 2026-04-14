@@ -1,0 +1,1 @@
+Move G-code assembly logic from ``cli.py`` into ``cura.assemble_cura_gcode()`` to respect module ownership boundaries.
