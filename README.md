@@ -40,9 +40,6 @@ away in the very near term.
   [#91](https://github.com/estampo/bambox/issues/91).
 - **No Windows native bridge.** Windows users need Docker Desktop for any
   bridged command; Linux ARM64 users need Docker + QEMU.
-- **PyPI publish is manual for v0.4.1.** The release workflow silently
-  no-op'd on the v0.4.1 merge (now [fixed](https://github.com/estampo/bambox/pull/198)).
-  If `pip install bambox` gives you 0.4.0, that's why.
 
 `bambox` is a standalone Python library and CLI for creating printer-ready
 Bambu Lab archives from any G-code source. It handles the BBL-specific
