@@ -211,14 +211,14 @@ class TestP1sNativeDefinition:
         assert "roofing_layer_count" in overrides
         assert "flooring_layer_count" in overrides
 
-    def test_p1s_end_gcode_no_ams_unload(self) -> None:
-        """Single-extruder definition must not have AMS filament pull-back."""
+    def test_p1s_end_gcode_has_ams_unload(self) -> None:
+        """End gcode must retract filament back to AMS."""
         defn = cura_definitions_dir() / "bambox_p1s.def.json"
         data = json.loads(defn.read_text())
         end = data["overrides"]["machine_end_gcode"]["default_value"]
-        assert "M620 S255" not in end
-        assert "M621 S255" not in end
-        assert "T255" not in end
+        assert "M620 S255" in end
+        assert "T255" in end
+        assert "M621 S255" in end
 
 
 class TestParseBamboxHeaders:
