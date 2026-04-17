@@ -39,7 +39,7 @@ Each module has a defined scope. Do not add logic to the wrong module — even i
 | `settings.py` | 544-key project_settings builder, profile loading, filament overlay, array broadcasting | G-code generation, archive packing, printer logic |
 | `bridge.py` | Cloud printing via the Rust `bambox-bridge` (local binary or Docker image), credential loading, AMS tray mapping, printer status | Archive construction, settings generation, slicer invocation |
 | `cli.py` | Typer commands (pack, print, status), argument parsing, user-facing output | Business logic — delegate to pack/bridge/settings |
-| `cura.py` | CuraEngine Docker invocation, profile conversion, start/end G-code injection | OrcaSlicer logic, archive packing, printer communication |
+| `cura.py` | BAMBOX header parsing, printer model ID mapping, slice statistics extraction | Printer definitions (live in estampo/cura-p1s), archive packing, printer communication |
 | `templates.py` | OrcaSlicer→Jinja2 syntax conversion, template rendering | G-code generation, settings logic |
 | `toolpath.py` | Synthetic toolpath generation for testing | Production G-code, slicer invocation |
 | `thumbnail.py` | G-code→PNG rendering (top-down view, bounding box) | Archive packing, settings |
