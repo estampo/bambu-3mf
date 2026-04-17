@@ -11,6 +11,7 @@ import pytest
 from bambox.credentials import (
     _cache_dir,
     _credentials_path,
+    _credentials_source,
     _escape_toml_value,
     _load_raw,
     _quote_toml_key,
@@ -23,6 +24,15 @@ from bambox.credentials import (
     save_cloud_credentials,
     save_printer,
 )
+
+
+@pytest.fixture(autouse=True)
+def _clear_credentials_env(monkeypatch):
+    """Prevent user's shell env from leaking into tests."""
+    monkeypatch.delenv("BAMBOX_CREDENTIALS_TOML", raising=False)
+    monkeypatch.delenv("BAMBOX_CREDENTIALS", raising=False)
+    monkeypatch.delenv("ESTAMPO_CREDENTIALS", raising=False)
+    monkeypatch.delenv("BAMBU_SERIAL", raising=False)
 
 
 class TestCacheDir:
@@ -313,7 +323,7 @@ class TestLoadPrinterCredentials:
         cred_path = tmp_path / "nonexistent" / "credentials.toml"
         monkeypatch.setattr("bambox.credentials._credentials_path", lambda: cred_path)
 
-        with pytest.raises(RuntimeError, match="Credentials file not found"):
+        with pytest.raises(RuntimeError, match="Credentials not found"):
             load_printer_credentials("myprinter")
 
     def test_printer_not_found_raises(self, tmp_path, monkeypatch):
@@ -380,3 +390,84 @@ class TestCloudTokenJson:
 
         with cloud_token_json() as path:
             assert path.stat().st_mode & 0o777 == 0o600
+
+
+class TestCredentialsTomlEnvVar:
+    """BAMBOX_CREDENTIALS_TOML holds the full TOML content in-memory."""
+
+    def test_loads_from_env_var(self, monkeypatch):
+        monkeypatch.setenv(
+            "BAMBOX_CREDENTIALS_TOML",
+            '[cloud]\ntoken = "env-tok"\nrefresh_token = "env-ref"\n'
+            'email = "env@test.com"\nuid = "42"\n',
+        )
+        cloud = load_cloud_credentials()
+        assert cloud is not None
+        assert cloud["token"] == "env-tok"
+        assert cloud["email"] == "env@test.com"
+
+    def test_env_var_overrides_file(self, tmp_path, monkeypatch):
+        cred_path = tmp_path / "credentials.toml"
+        cred_path.write_text('[cloud]\ntoken = "file-tok"\n')
+        monkeypatch.setattr("bambox.credentials._credentials_path", lambda: cred_path)
+        monkeypatch.setenv("BAMBOX_CREDENTIALS_TOML", '[cloud]\ntoken = "env-tok"\n')
+
+        cloud = load_cloud_credentials()
+        assert cloud is not None
+        assert cloud["token"] == "env-tok"
+
+    def test_env_var_with_printers(self, monkeypatch):
+        monkeypatch.setenv(
+            "BAMBOX_CREDENTIALS_TOML",
+            '[printers.workshop]\ntype = "bambu-cloud"\nserial = "SN999"\n',
+        )
+        creds = load_printer_credentials("workshop")
+        assert creds["serial"] == "SN999"
+
+    def test_cloud_token_json_from_env_var(self, monkeypatch):
+        monkeypatch.setenv(
+            "BAMBOX_CREDENTIALS_TOML",
+            '[cloud]\ntoken = "envtok"\nrefresh_token = "envref"\nemail = "e@e.com"\nuid = "1"\n',
+        )
+        with cloud_token_json() as path:
+            assert path.exists()
+            data = json.loads(path.read_text())
+            assert data["token"] == "envtok"
+            assert data["refreshToken"] == "envref"
+
+    def test_save_cloud_raises_in_env_var_mode(self, monkeypatch):
+        monkeypatch.setenv("BAMBOX_CREDENTIALS_TOML", '[cloud]\ntoken = "tok"\n')
+        with pytest.raises(RuntimeError, match="BAMBOX_CREDENTIALS_TOML"):
+            save_cloud_credentials(token="new", refresh_token="new", email="a@b.com", uid="1")
+
+    def test_save_printer_raises_in_env_var_mode(self, monkeypatch):
+        monkeypatch.setenv("BAMBOX_CREDENTIALS_TOML", "")
+        with pytest.raises(RuntimeError, match="BAMBOX_CREDENTIALS_TOML"):
+            save_printer("new", {"type": "bambu-cloud", "serial": "SN"})
+
+    def test_empty_env_var_yields_empty_dict(self, monkeypatch):
+        monkeypatch.setenv("BAMBOX_CREDENTIALS_TOML", "")
+        assert _load_raw() == {}
+        assert load_cloud_credentials() is None
+
+    def test_invalid_toml_raises(self, monkeypatch):
+        import tomllib
+
+        monkeypatch.setenv("BAMBOX_CREDENTIALS_TOML", "not = valid = toml")
+        with pytest.raises(tomllib.TOMLDecodeError):
+            _load_raw()
+
+    def test_credentials_source_reports_env_var(self, monkeypatch):
+        monkeypatch.setenv("BAMBOX_CREDENTIALS_TOML", "")
+        assert _credentials_source() == "BAMBOX_CREDENTIALS_TOML env var"
+
+    def test_credentials_source_reports_path_when_unset(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("BAMBOX_CREDENTIALS_TOML", raising=False)
+        cred_path = tmp_path / "credentials.toml"
+        monkeypatch.setattr("bambox.credentials._credentials_path", lambda: cred_path)
+        assert _credentials_source() == str(cred_path)
+
+    def test_error_message_mentions_env_var_source(self, monkeypatch):
+        monkeypatch.setenv("BAMBOX_CREDENTIALS_TOML", "")
+        with pytest.raises(RuntimeError, match="BAMBOX_CREDENTIALS_TOML env var"):
+            load_printer_credentials("nonexistent")

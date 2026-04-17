@@ -46,6 +46,17 @@ def mask_serial(serial: str) -> str:
     return "*" * (len(serial) - 4) + serial[-4:]
 
 
+def _credentials_source() -> str:
+    """Describe where credentials are loaded from (for error messages).
+
+    Returns either the env var name (when ``BAMBOX_CREDENTIALS_TOML`` is set)
+    or the resolved file path.
+    """
+    if "BAMBOX_CREDENTIALS_TOML" in os.environ:
+        return "BAMBOX_CREDENTIALS_TOML env var"
+    return str(_credentials_path())
+
+
 def _credentials_path() -> Path:
     """Return the path to the credentials file.
 
@@ -89,12 +100,21 @@ def _credentials_path() -> Path:
 
 
 def _load_raw() -> dict:
-    """Load the raw credentials TOML, or return empty dict if not found."""
+    """Load the raw credentials TOML, or return empty dict if not found.
+
+    When ``BAMBOX_CREDENTIALS_TOML`` is set, its value is parsed as TOML
+    content directly (useful for CI / containers where writing a file is
+    awkward).  Otherwise the file at :func:`_credentials_path` is read.
+    """
+    import tomllib
+
+    env_toml = os.environ.get("BAMBOX_CREDENTIALS_TOML")
+    if env_toml is not None:
+        return tomllib.loads(env_toml)
+
     path = _credentials_path()
     if not path.exists():
         return {}
-    import tomllib
-
     with open(path, "rb") as f:
         return tomllib.load(f)
 
@@ -117,7 +137,15 @@ def _write_credentials(data: dict) -> None:
     Uses ``os.open()`` with explicit mode so the file is never world-readable,
     even briefly.  Manual TOML writer (tomllib is read-only, no tomli_w
     dependency).
+
+    Raises when ``BAMBOX_CREDENTIALS_TOML`` is set — env-var mode is
+    read-only; writes would not persist across runs.
     """
+    if "BAMBOX_CREDENTIALS_TOML" in os.environ:
+        raise RuntimeError(
+            "Cannot save credentials: BAMBOX_CREDENTIALS_TOML is set (read-only mode). "
+            "Unset it or use BAMBOX_CREDENTIALS to point to a writable file."
+        )
     path = _credentials_path()
     if sys.platform != "win32":
         path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -199,13 +227,14 @@ def load_printer_credentials(name: str) -> dict[str, str]:
     raw = _load_raw()
     if not raw:
         raise RuntimeError(
-            f"Credentials file not found: {_credentials_path()}\nRun 'bambox login' to create it."
+            f"Credentials not found: {_credentials_source()}\n"
+            "Run 'bambox login' or set BAMBOX_CREDENTIALS_TOML to create credentials."
         )
     printers = raw.get("printers", {})
     if name not in printers:
         available = list(printers.keys())
         raise RuntimeError(
-            f"Printer '{name}' not found in {_credentials_path()}. Available: {available}"
+            f"Printer '{name}' not found in {_credentials_source()}. Available: {available}"
         )
     creds = dict(printers[name])
 
