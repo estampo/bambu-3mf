@@ -1,9 +1,11 @@
-"""CuraEngine integration: printer definitions and BAMBOX header parsing.
+"""CuraEngine integration: BAMBOX header parsing and slice statistics.
 
-Provides bundled CuraEngine printer definitions with BAMBOX header comments
-that bambox reads to auto-configure packaging. The header contract lets
-CuraEngine output carry machine-readable metadata without coupling the
-slicer to Bambu Lab specifics.
+Parses BAMBOX header comments from G-code to auto-configure packaging.
+The header contract lets CuraEngine output carry machine-readable metadata
+without coupling the slicer to Bambu Lab specifics.
+
+Printer definitions live in their own repos (e.g. estampo/cura-p1s),
+not in bambox.
 
 Header format (emitted as G-code comments by the printer definition)::
 
@@ -22,7 +24,6 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
-from pathlib import Path
 
 from bambox.gcode_compat import _FILAMENT_AREA
 
@@ -44,26 +45,6 @@ PRINTER_MODEL_IDS: dict[str, str] = {
     "a1": "N2S",
     "a1_mini": "N1",
 }
-
-_CURA_DIR = Path(__file__).parent / "data" / "cura"
-
-
-def cura_definitions_dir() -> Path:
-    """Return the path to bundled CuraEngine definition files.
-
-    Pass this to CuraEngine's ``-d`` flag so it can resolve
-    ``bambox_p1s_ams`` and its extruder definitions.
-    """
-    return _CURA_DIR
-
-
-def available_cura_printers() -> list[str]:
-    """Return names of bundled CuraEngine printer definitions."""
-    return [
-        p.name.removesuffix(".def.json")
-        for p in sorted(_CURA_DIR.glob("*.def.json"))
-        if "extruder" not in p.name
-    ]
 
 
 # ---------------------------------------------------------------------------
