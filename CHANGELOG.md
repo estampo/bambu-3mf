@@ -5,6 +5,26 @@ This changelog is managed by [towncrier](https://towncrier.readthedocs.io/).
 
 <!-- towncrier release notes start -->
 
+## 0.4.3 — 2026-04-18
+
+### Features
+
+- Add pre-packaging G-code safety validation (S001–S003) to catch dangerous Z moves, premature heater shutdown, and extrusion before homing. ([#207](https://github.com/estampo/bambox/pull/207))
+- Add native single-extruder CuraEngine P1S definition (``bambox_p1s``) with complete start/end G-code — no bambox post-processing required. Remove the ``bambox_p1s_ams`` multi-extruder definition and the G-code assembly/tool-change rewriting pipeline (see ADR-003). ([#210](https://github.com/estampo/bambox/pull/210))
+- Support ``BAMBOX_CREDENTIALS_TOML`` env var holding the full credentials TOML content, for CI and container deployments where writing a file is awkward. ([#215](https://github.com/estampo/bambox/pull/215))
+
+### Bugfixes
+
+- Fix unsafe ``max_layer_z`` default (0.4mm) that caused the nozzle to crash into tall prints at end of Cura-assembled G-code. ([#203](https://github.com/estampo/bambox/pull/203))
+- Pass ``-m`` machine flag through to ``repack_3mf`` even when ``-f`` is not provided. ([#212](https://github.com/estampo/bambox/pull/212))
+- ``repack`` now patches ``printer_model_id`` in ``slice_info.config`` from the ``-m`` machine flag. ([#213](https://github.com/estampo/bambox/pull/213))
+
+### Misc
+
+- Move G-code assembly logic from ``cli.py`` into ``cura.assemble_cura_gcode()`` to respect module ownership boundaries. ([#204](https://github.com/estampo/bambox/pull/204))
+- Move P1S CuraEngine printer definition to its own repo (estampo/cura-p1s)
+
+
 ## 0.4.2 — 2026-04-14
 
 ### Features
