@@ -647,7 +647,7 @@ def repack(
     else:
         filament_types = None
         filament_colors = None
-    real_machine = machine if filament_types else None
+    real_machine = machine
 
     try:
         repack_3mf(

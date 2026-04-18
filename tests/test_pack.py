@@ -672,6 +672,64 @@ class TestRepack3mf:
             assert "filament_colors" in plate_data
             assert plate_data["version"] == 2
 
+    def test_repack_patches_printer_model_id(self, tmp_path: Path) -> None:
+        """repack with machine should patch printer_model_id in slice_info.config."""
+        from bambox.pack import repack_3mf
+
+        slice_info_xml = (
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            "<config><plate>\n"
+            '<metadata key="printer_model_id" value=""/>\n'
+            '<metadata key="prediction" value="100"/>\n'
+            "</plate></config>"
+        )
+        out = self._make_3mf(
+            tmp_path,
+            **{"Metadata/slice_info.config": slice_info_xml.encode()},
+        )
+        repack_3mf(out, machine="p1s")
+        with zipfile.ZipFile(out) as z:
+            si = z.read("Metadata/slice_info.config").decode()
+            assert 'value="C12"' in si
+
+    def test_repack_patches_printer_model_id_x1c(self, tmp_path: Path) -> None:
+        """repack with machine=x1c should set printer_model_id to BL-P001."""
+        from bambox.pack import repack_3mf
+
+        slice_info_xml = (
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            "<config><plate>\n"
+            '<metadata key="printer_model_id" value="wrong"/>\n'
+            "</plate></config>"
+        )
+        out = self._make_3mf(
+            tmp_path,
+            **{"Metadata/slice_info.config": slice_info_xml.encode()},
+        )
+        repack_3mf(out, machine="x1c")
+        with zipfile.ZipFile(out) as z:
+            si = z.read("Metadata/slice_info.config").decode()
+            assert 'value="BL-P001"' in si
+
+    def test_repack_no_machine_preserves_slice_info(self, tmp_path: Path) -> None:
+        """repack without machine should not modify slice_info.config."""
+        from bambox.pack import repack_3mf
+
+        slice_info_xml = (
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            "<config><plate>\n"
+            '<metadata key="printer_model_id" value="original"/>\n'
+            "</plate></config>"
+        )
+        out = self._make_3mf(
+            tmp_path,
+            **{"Metadata/slice_info.config": slice_info_xml.encode()},
+        )
+        repack_3mf(out)
+        with zipfile.ZipFile(out) as z:
+            si = z.read("Metadata/slice_info.config").decode()
+            assert 'value="original"' in si
+
 
 # ---------------------------------------------------------------------------
 # File output

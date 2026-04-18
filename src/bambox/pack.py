@@ -398,6 +398,15 @@ def fixup_model_settings(xml: str, min_slots: int = MIN_SLOTS) -> str:
     return result
 
 
+def _patch_slice_info_printer_model(xml_str: str, printer_model_id: str) -> str:
+    """Replace the printer_model_id value in slice_info.config XML."""
+    return re.sub(
+        r'(<metadata key="printer_model_id" value=")[^"]*(")',
+        rf"\g<1>{printer_model_id}\g<2>",
+        xml_str,
+    )
+
+
 def repack_3mf(
     path: Path,
     *,
@@ -480,6 +489,19 @@ def repack_3mf(
                 f'    <metadata key="pattern_bbox_file" value="{_PLATE_JSON_PATH}"/>\n  </plate>',
             )
 
+        # --- Fix slice_info.config (printer_model_id) ---
+        try:
+            si_raw = zin.read("Metadata/slice_info.config").decode()
+        except KeyError:
+            si_raw = None
+        si_patched: str | None = None
+        if si_raw is not None and machine:
+            from bambox.cura import PRINTER_MODEL_IDS
+
+            model_id = PRINTER_MODEL_IDS.get(machine.lower(), "")
+            if model_id:
+                si_patched = _patch_slice_info_printer_model(si_raw, model_id)
+
         # --- Fix thumbnails ---
         thumb_files = [
             "Metadata/plate_1.png",
@@ -528,6 +550,8 @@ def repack_3mf(
                     zout.writestr(item, json.dumps(ps, indent=4) + "\n")
                 elif item.filename == "Metadata/model_settings.config" and ms_patched:
                     zout.writestr(item, ms_patched)
+                elif item.filename == "Metadata/slice_info.config" and si_patched:
+                    zout.writestr(item, si_patched)
                 else:
                     zout.writestr(item, zin.read(item.filename))
 

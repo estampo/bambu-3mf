@@ -283,7 +283,16 @@ class TestCmdRepack:
         with patch("bambox.cli.repack_3mf") as mock_repack:
             main(["repack", str(threemf)])
             mock_repack.assert_called_once()
-            assert mock_repack.call_args[1]["machine"] is None
+            assert mock_repack.call_args[1]["machine"] == "p1s"
+
+    def test_repack_machine_without_filament(self, tmp_path: Path) -> None:
+        threemf = tmp_path / "test.gcode.3mf"
+        threemf.write_bytes(b"fake")
+
+        with patch("bambox.cli.repack_3mf") as mock_repack:
+            main(["repack", str(threemf), "-m", "x1c"])
+            assert mock_repack.call_args[1]["machine"] == "x1c"
+            assert mock_repack.call_args[1]["filaments"] is None
 
     def test_repack_with_filament(self, tmp_path: Path) -> None:
         threemf = tmp_path / "test.gcode.3mf"
