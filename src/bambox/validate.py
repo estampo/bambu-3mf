@@ -573,23 +573,19 @@ def _check_end_z_safety(gcode: str, findings: list[Finding]) -> None:
 
 def _check_premature_heater_off(gcode: str, findings: list[Finding]) -> None:
     """S002: M104/M109/M140 S0 in toolpath section (premature heater shutdown)."""
-    end_start = _find_end_gcode_start(gcode)
-    toolpath_section = gcode[:end_start]
-
-    for line in toolpath_section.splitlines():
-        stripped = line.strip()
-        if stripped.startswith(";"):
+    for m in _RE_TEMP_ZERO.finditer(gcode):
+        # If no extrusion moves follow, the toolpath is complete — not premature.
+        if not _RE_EXTRUSION.search(gcode, m.end()):
             continue
-        if _RE_TEMP_ZERO.match(stripped):
-            findings.append(
-                Finding(
-                    Severity.ERROR,
-                    "S002",
-                    "Heater set to 0 during toolpath (premature shutdown)",
-                    stripped[:120],
-                )
+        findings.append(
+            Finding(
+                Severity.ERROR,
+                "S002",
+                "Heater set to 0 during toolpath (premature shutdown)",
+                m.group()[:120],
             )
-            return  # one finding is enough
+        )
+        return  # one finding is enough
 
 
 def _check_extrusion_before_homing(gcode: str, findings: list[Finding]) -> None:

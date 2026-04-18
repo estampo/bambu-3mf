@@ -1004,6 +1004,7 @@ M104 S0
 ;Z:0.4
 M73 L2
 M991 S0 P2
+G1 X20 Y20 E2 F600
 """
         result = validate_gcode(gcode)
         assert not result.valid
@@ -1012,6 +1013,29 @@ M991 S0 P2
 
     def test_s002_heater_off_in_end_section_ok(self) -> None:
         result = validate_gcode(_SAFE_GCODE)
+        s002_errors = [f for f in result.errors if f.code == "S002"]
+        assert len(s002_errors) == 0
+
+    def test_s002_heater_off_after_last_extrusion_ok(self) -> None:
+        """M140 S0 right after the last extrusion move is not premature (#222)."""
+        gcode = """\
+G28
+;LAYER_CHANGE
+;Z:0.2
+M73 L1
+M991 S0 P1
+G1 X10 Y10 E1 F600
+;LAYER_CHANGE
+;Z:0.4
+M73 L2
+M991 S0 P2
+G1 F1500 E1877.70409
+M140 S0
+M107
+G1 Z50
+M104 S0
+"""
+        result = validate_gcode(gcode)
         s002_errors = [f for f in result.errors if f.code == "S002"]
         assert len(s002_errors) == 0
 

@@ -1,0 +1,1 @@
+Fix false positive S002 safety check on heater-off commands after last extrusion move.
