@@ -1,1 +1,0 @@
-Fix unsafe ``max_layer_z`` default (0.4mm) that caused the nozzle to crash into tall prints at end of Cura-assembled G-code.

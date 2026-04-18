@@ -1,1 +1,0 @@
-``repack`` now patches ``printer_model_id`` in ``slice_info.config`` from the ``-m`` machine flag.
