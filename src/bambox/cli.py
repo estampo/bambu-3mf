@@ -821,6 +821,9 @@ def print_cmd(
     yes: Annotated[
         bool, typer.Option("-y", "--yes", help="Skip AMS mapping confirmation prompt")
     ] = False,
+    force: Annotated[
+        bool, typer.Option("--force", help="Send even if validation finds errors")
+    ] = False,
 ) -> None:
     """Send a .gcode.3mf to a Bambu printer via cloud bridge."""
     _warn_experimental()
@@ -829,6 +832,23 @@ def print_cmd(
     if not threemf.exists():
         ui.error(f"{threemf} not found")
         sys.exit(1)
+
+    # Validate the archive before sending to the printer
+    from bambox.validate import validate_3mf
+
+    val_result = validate_3mf(threemf)
+    for f in val_result.warnings:
+        ui.warn(f"[{f.code}] {f.message}")
+    for f in val_result.errors:
+        ui.error(f"[{f.code}] {f.message}")
+        if f.detail:
+            ui.error(f"  {f.detail}")
+    if not val_result.valid:
+        if force:
+            ui.warn("Validation errors found — proceeding anyway (--force)")
+        else:
+            ui.error("Validation failed. Use --force to send anyway.")
+            sys.exit(1)
 
     creds_path = credentials
     try:

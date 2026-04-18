@@ -328,6 +328,14 @@ class TestCmdRepack:
 
 
 class TestCmdPrint:
+    @pytest.fixture(autouse=True)
+    def _skip_validation(self) -> ...:  # type: ignore[override]
+        """Most print tests use fake archives — bypass validate_3mf."""
+        from bambox.validate import ValidationResult
+
+        with patch("bambox.validate.validate_3mf", return_value=ValidationResult()):
+            yield
+
     def test_print_missing_file(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
         missing = tmp_path / "nope.gcode.3mf"
         with patch("bambox.bridge.load_credentials", return_value={"token": "t"}):
@@ -489,6 +497,66 @@ class TestCmdPrint:
         ):
             main(["print", str(threemf), "-d", "SER", "--timeout", "300"])
             assert mock_cp.call_args[1]["timeout"] == 300
+
+
+class TestPrintValidation:
+    """Tests for pre-print archive validation gate."""
+
+    def test_print_blocks_on_validation_error(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        from bambox.validate import Finding, Severity, ValidationResult
+
+        threemf = tmp_path / "test.gcode.3mf"
+        threemf.write_bytes(b"fake")
+        bad_result = ValidationResult([Finding(Severity.ERROR, "E000", "Not a valid ZIP file")])
+        with (
+            patch("bambox.validate.validate_3mf", return_value=bad_result),
+            patch("bambox.bridge.load_credentials", return_value={"token": "t"}),
+        ):
+            with pytest.raises(SystemExit, match="1"):
+                main(["print", str(threemf), "-d", "SER"])
+        err = capsys.readouterr().err
+        assert "E000" in err
+        assert "--force" in err
+
+    def test_print_force_overrides_validation(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        from bambox.validate import Finding, Severity, ValidationResult
+
+        threemf = tmp_path / "test.gcode.3mf"
+        threemf.write_bytes(b"fake")
+        bad_result = ValidationResult([Finding(Severity.ERROR, "E000", "Not a valid ZIP file")])
+        with (
+            patch("bambox.validate.validate_3mf", return_value=bad_result),
+            patch("bambox.bridge.load_credentials", return_value={"token": "t"}),
+            patch("bambox.bridge.cloud_print", return_value={"result": "sent"}),
+        ):
+            main(["print", str(threemf), "-d", "SER", "--force"])
+        combined = capsys.readouterr()
+        assert "proceeding anyway" in combined.err
+        assert "successfully" in combined.out
+
+    def test_print_warnings_shown_but_not_blocked(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        from bambox.validate import Finding, Severity, ValidationResult
+
+        threemf = tmp_path / "test.gcode.3mf"
+        threemf.write_bytes(b"fake")
+        warn_result = ValidationResult(
+            [Finding(Severity.WARNING, "W001", "printer_model_id is empty")]
+        )
+        with (
+            patch("bambox.validate.validate_3mf", return_value=warn_result),
+            patch("bambox.bridge.load_credentials", return_value={"token": "t"}),
+            patch("bambox.bridge.cloud_print", return_value={"result": "sent"}),
+        ):
+            main(["print", str(threemf), "-d", "SER"])
+        combined = capsys.readouterr()
+        assert "W001" in combined.err
+        assert "successfully" in combined.out
 
 
 # ---------------------------------------------------------------------------
