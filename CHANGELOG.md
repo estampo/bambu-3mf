@@ -5,6 +5,18 @@ This changelog is managed by [towncrier](https://towncrier.readthedocs.io/).
 
 <!-- towncrier release notes start -->
 
+## 0.4.4 — 2026-04-18
+
+### Features
+
+- Release pipeline now automatically creates an issue on ``estampo/estampo`` when a full (non-prerelease) bambox version is published to PyPI.
+
+### Bugfixes
+
+- Docker bridge images now tagged with bambox version (``vX.Y.Z``) and ``latest`` in addition to the Bambu SDK version. Fixed broken release skip guard that used an unreliable GitHub API call. ([#202](https://github.com/estampo/bambox/pull/202))
+- Fix false positive S002 safety check on heater-off commands after last extrusion move. ([#222](https://github.com/estampo/bambox/pull/222))
+
+
 ## 0.4.3 — 2026-04-18
 
 ### Features

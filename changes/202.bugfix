@@ -1,1 +1,0 @@
-Docker bridge images now tagged with bambox version (``vX.Y.Z``) and ``latest`` in addition to the Bambu SDK version. Fixed broken release skip guard that used an unreliable GitHub API call.
