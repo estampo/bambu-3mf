@@ -273,6 +273,34 @@ jobs:
         with:
           skip-existing: true
 
+  # ── Notify estampo of new release ────────────────────────────────────
+  # Creates an issue on estampo/estampo so maintainers know to update
+  # the bambox dependency. Skipped for pre-releases (rc, alpha, beta).
+  notify-estampo:
+    needs: [version, publish-pypi]
+    if: |
+      always() &&
+      needs.version.result == 'success' &&
+      needs.publish-pypi.result == 'success' &&
+      !contains(needs.version.outputs.version, 'a') &&
+      !contains(needs.version.outputs.version, 'b') &&
+      !contains(needs.version.outputs.version, 'rc')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create issue on estampo/estampo
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
+        run: |
+          VERSION="${{ needs.version.outputs.version }}"
+          gh issue create \
+            --repo estampo/estampo \
+            --title "bambox v${VERSION} released — update dependency" \
+            --body "bambox [v${VERSION}](https://github.com/estampo/bambox/releases/tag/v${VERSION}) has been published to PyPI.
+
+          Please update the bambox dependency to \`>=${VERSION}\` and rebuild.
+
+          _This issue was created automatically by the bambox release pipeline._"
+
   # ── Trigger bridge binary build ─────────────────────────────────────
   # Tags created by GITHUB_TOKEN don't trigger other workflows, so we
   # explicitly dispatch the bridge build to attach native binaries to
