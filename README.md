@@ -302,6 +302,18 @@ Options:
 | `-n, --dry-run` | Show print info without sending |
 | `-y, --yes` | Skip confirmation prompt |
 
+To enable the first-layer bed-type mismatch warning, record the plate
+installed on each printer in `credentials.toml`:
+
+```toml
+[printers.my_printer]
+serial = "00M201234567890"
+plate_type = "Textured PEI Plate"
+```
+
+When the sliced G-code's `curr_bed_type` differs from the configured
+`plate_type`, `bambox print` prints a warning (it does not block).
+
 ### `bambox status` — Query printer
 
 Query printer status and AMS tray info.

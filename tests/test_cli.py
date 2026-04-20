@@ -607,6 +607,113 @@ class TestPrintValidation:
         assert "successfully" in combined.out
 
 
+def _make_threemf_with_bed_type(path: Path, bed_type: str) -> None:
+    """Write a minimal .gcode.3mf containing only project_settings.config."""
+    import zipfile
+
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr(
+            "Metadata/project_settings.config",
+            json.dumps({"curr_bed_type": bed_type}),
+        )
+
+
+class TestPrintBedTypeMismatch:
+    """Tests for bed_type mismatch detection (issue #228)."""
+
+    @pytest.fixture(autouse=True)
+    def _skip_validation(self) -> ...:  # type: ignore[override]
+        from bambox.validate import ValidationResult
+
+        with patch("bambox.validate.validate_3mf", return_value=ValidationResult()):
+            yield
+
+    def test_mismatch_emits_warning(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        threemf = tmp_path / "test.gcode.3mf"
+        _make_threemf_with_bed_type(threemf, "Cool Plate")
+        creds_file = tmp_path / "credentials.toml"
+        creds_file.write_text(
+            '[cloud]\ntoken = "tok"\n'
+            '[printers.myp]\nserial = "ABC"\nplate_type = "Textured PEI Plate"\n'
+        )
+        with (
+            patch("bambox.bridge.load_credentials", return_value={"token": "t"}),
+            patch("bambox.bridge.cloud_print", return_value={"result": "sent"}),
+        ):
+            main(["print", str(threemf), "-p", "myp", "-c", str(creds_file), "--no-ams-mapping"])
+        err = capsys.readouterr().err
+        assert "Cool Plate" in err
+        assert "Textured PEI Plate" in err
+        assert "nozzle crash" in err
+
+    def test_match_emits_no_warning(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        threemf = tmp_path / "test.gcode.3mf"
+        _make_threemf_with_bed_type(threemf, "Textured PEI Plate")
+        creds_file = tmp_path / "credentials.toml"
+        creds_file.write_text(
+            '[cloud]\ntoken = "tok"\n'
+            '[printers.myp]\nserial = "ABC"\nplate_type = "Textured PEI Plate"\n'
+        )
+        with (
+            patch("bambox.bridge.load_credentials", return_value={"token": "t"}),
+            patch("bambox.bridge.cloud_print", return_value={"result": "sent"}),
+        ):
+            main(["print", str(threemf), "-p", "myp", "-c", str(creds_file), "--no-ams-mapping"])
+        assert "nozzle crash" not in capsys.readouterr().err
+
+    def test_match_case_insensitive(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        threemf = tmp_path / "test.gcode.3mf"
+        _make_threemf_with_bed_type(threemf, "textured pei plate")
+        creds_file = tmp_path / "credentials.toml"
+        creds_file.write_text(
+            '[cloud]\ntoken = "tok"\n'
+            '[printers.myp]\nserial = "ABC"\nplate_type = "Textured PEI Plate"\n'
+        )
+        with (
+            patch("bambox.bridge.load_credentials", return_value={"token": "t"}),
+            patch("bambox.bridge.cloud_print", return_value={"result": "sent"}),
+        ):
+            main(["print", str(threemf), "-p", "myp", "-c", str(creds_file), "--no-ams-mapping"])
+        assert "nozzle crash" not in capsys.readouterr().err
+
+    def test_no_plate_configured_skips_silently(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        threemf = tmp_path / "test.gcode.3mf"
+        _make_threemf_with_bed_type(threemf, "Cool Plate")
+        creds_file = tmp_path / "credentials.toml"
+        creds_file.write_text('[cloud]\ntoken = "tok"\n[printers.myp]\nserial = "ABC"\n')
+        with (
+            patch("bambox.bridge.load_credentials", return_value={"token": "t"}),
+            patch("bambox.bridge.cloud_print", return_value={"result": "sent"}),
+        ):
+            main(["print", str(threemf), "-p", "myp", "-c", str(creds_file), "--no-ams-mapping"])
+        assert "nozzle crash" not in capsys.readouterr().err
+
+    def test_unreadable_archive_does_not_warn(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        threemf = tmp_path / "test.gcode.3mf"
+        threemf.write_bytes(b"not a zip")
+        creds_file = tmp_path / "credentials.toml"
+        creds_file.write_text(
+            '[cloud]\ntoken = "tok"\n'
+            '[printers.myp]\nserial = "ABC"\nplate_type = "Textured PEI Plate"\n'
+        )
+        with (
+            patch("bambox.bridge.load_credentials", return_value={"token": "t"}),
+            patch("bambox.bridge.cloud_print", return_value={"result": "sent"}),
+        ):
+            main(["print", str(threemf), "-p", "myp", "-c", str(creds_file), "--no-ams-mapping"])
+        assert "nozzle crash" not in capsys.readouterr().err
+
+
 # ---------------------------------------------------------------------------
 # cancel via main()
 # ---------------------------------------------------------------------------
