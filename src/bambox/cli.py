@@ -20,7 +20,12 @@ from bambox.cura import (
     parse_bambox_headers,
 )
 from bambox.pack import FilamentInfo, SliceInfo, pack_gcode_3mf, repack_3mf
-from bambox.settings import available_filaments, available_machines, build_project_settings
+from bambox.settings import (
+    available_filaments,
+    available_machines,
+    build_project_settings,
+    validate_printer_profile,
+)
 
 log = logging.getLogger(__name__)
 
@@ -550,6 +555,16 @@ def pack(
     else:
         assigned = _assign_filament_slots(_parse_filament_args(filament))
 
+    # Pre-flight: make sure the printer we resolved (CLI flag or header)
+    # has a well-formed bundled profile before doing any real work. This
+    # surfaces unknown / malformed printers at pack time rather than at
+    # print time with a cryptic firmware error.
+    try:
+        validate_printer_profile(machine)
+    except ValueError as e:
+        ui.error(str(e))
+        sys.exit(1)
+
     filament_types = [f[1] for f in assigned]
     filament_colors = [f[2] for f in assigned]
 
@@ -666,6 +681,12 @@ def repack(
         filament_types = None
         filament_colors = None
     real_machine = machine
+
+    try:
+        validate_printer_profile(real_machine)
+    except ValueError as e:
+        ui.error(str(e))
+        sys.exit(1)
 
     try:
         repack_3mf(

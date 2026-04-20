@@ -1,0 +1,1 @@
+`bambox pack` and `bambox repack` now fail loudly at entry when the requested printer has no bundled profile, no firmware model-ID mapping, or a malformed base profile — surfacing the problem at pack time rather than as a cryptic firmware rejection at print time.

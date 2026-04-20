@@ -60,6 +60,61 @@ def _machine_profile_path(machine: str) -> Path:
     return path
 
 
+# Keys every bundled machine base profile is expected to contain. A profile
+# missing these can still technically be loaded, but packing will produce a
+# ``.gcode.3mf`` the printer firmware rejects — we'd rather fail at pack time.
+REQUIRED_BASE_PROFILE_KEYS: frozenset[str] = frozenset(
+    {
+        "printer_model",
+        "printer_variant",
+        "printer_settings_id",
+        "nozzle_diameter",
+        "printable_area",
+    }
+)
+
+
+def validate_printer_profile(machine: str) -> None:
+    """Validate that ``machine`` has a usable, well-formed bundled profile.
+
+    This is the single pack-time pre-flight check for the requested printer.
+    It catches three distinct failure modes before any archive is produced:
+
+    1. No ``base_<machine>.json`` profile exists for the requested printer
+       (``--machine`` value or ``BAMBOX_PRINTER=`` header refers to an
+       unsupported printer).
+    2. A profile exists but the printer has no entry in
+       :data:`bambox.cura.PRINTER_MODEL_IDS` — packing would embed an empty
+       ``printer_model_id`` in the archive, which the firmware rejects.
+    3. A profile exists but is missing keys in
+       :data:`REQUIRED_BASE_PROFILE_KEYS` — the settings blob would be
+       incomplete and the firmware would reject it at print time.
+
+    Raises:
+        ValueError: with a message naming the offending piece and, where
+            useful, the set of supported printers.
+    """
+    from bambox.cura import PRINTER_MODEL_IDS
+
+    avail = available_machines()
+    if machine not in avail:
+        raise ValueError(f"Unknown printer '{machine}'. Supported printers: {sorted(avail)}")
+
+    if machine.lower() not in PRINTER_MODEL_IDS:
+        raise ValueError(
+            f"Printer '{machine}' has a bundled profile but no entry in "
+            f"bambox.cura.PRINTER_MODEL_IDS. Add the firmware model ID "
+            f"mapping before packing."
+        )
+
+    profile = _load_json(_machine_profile_path(machine))
+    missing = sorted(REQUIRED_BASE_PROFILE_KEYS - set(profile.keys()))
+    if missing:
+        raise ValueError(
+            f"Printer profile '{machine}' is malformed: missing required key(s) {missing}"
+        )
+
+
 def build_project_settings(
     filaments: list[str],
     *,
