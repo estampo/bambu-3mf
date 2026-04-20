@@ -661,10 +661,14 @@ def pack(
         except ValueError:
             pass
 
-    # Auto-derive printer_model_id from BAMBOX_PRINTER header if not set via CLI
+    # Auto-derive printer_model_id from the resolved machine name (set via -m
+    # or a BAMBOX_PRINTER header). Without this fallback, callers that don't
+    # know to pass --printer-model-id — including estampo's CuraEngine
+    # pipeline — produce archives that fail W001 and may be rejected by the
+    # printer firmware.
     real_printer_model_id = printer_model_id
-    if not real_printer_model_id and "PRINTER" in headers:
-        real_printer_model_id = PRINTER_MODEL_IDS.get(headers["PRINTER"].lower(), "")
+    if not real_printer_model_id:
+        real_printer_model_id = PRINTER_MODEL_IDS.get(machine.lower(), "")
 
     # Extract print time and filament weight from slicer G-code comments
     stats = extract_slice_stats(gcode_str)
