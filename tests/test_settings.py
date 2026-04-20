@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+from unittest.mock import patch
+
 import pytest
 
 from bambox.settings import (
@@ -10,6 +14,7 @@ from bambox.settings import (
     available_filaments,
     available_machines,
     build_project_settings,
+    validate_printer_profile,
 )
 
 
@@ -104,3 +109,54 @@ class TestBuildProjectSettings:
         ft = result.get("filament_type")
         assert isinstance(ft, list)
         assert len(ft) == 3
+
+
+class TestValidatePrinterProfile:
+    def test_valid_machine_passes(self) -> None:
+        validate_printer_profile("p1s")
+
+    def test_unknown_machine_raises_with_supported_list(self) -> None:
+        with pytest.raises(ValueError) as exc:
+            validate_printer_profile("nonexistent_printer")
+        msg = str(exc.value)
+        assert "Unknown printer 'nonexistent_printer'" in msg
+        assert "p1s" in msg
+
+    def test_profile_without_model_id_mapping_raises(self, tmp_path: Path) -> None:
+        """A bundled profile without a PRINTER_MODEL_IDS entry must fail fast.
+
+        This protects against the silent empty ``printer_model_id`` path,
+        where the archive is accepted by bambox but rejected by firmware.
+        """
+        with (
+            patch("bambox.settings._DATA_DIR", tmp_path),
+            patch("bambox.cura.PRINTER_MODEL_IDS", {"p1s": "C12"}),
+        ):
+            (tmp_path / "base_foo.json").write_text(
+                json.dumps(
+                    {
+                        "printer_model": "Foo",
+                        "printer_variant": "0.4",
+                        "printer_settings_id": "Foo 0.4",
+                        "nozzle_diameter": ["0.4"],
+                        "printable_area": ["0x0"],
+                    }
+                )
+            )
+            with pytest.raises(ValueError) as exc:
+                validate_printer_profile("foo")
+            assert "PRINTER_MODEL_IDS" in str(exc.value)
+
+    def test_malformed_profile_missing_keys_raises(self, tmp_path: Path) -> None:
+        """A profile missing required keys must fail fast and name the key(s)."""
+        with (
+            patch("bambox.settings._DATA_DIR", tmp_path),
+            patch("bambox.cura.PRINTER_MODEL_IDS", {"bar": "XYZ"}),
+        ):
+            (tmp_path / "base_bar.json").write_text(json.dumps({"printer_model": "Bar"}))
+            with pytest.raises(ValueError) as exc:
+                validate_printer_profile("bar")
+            msg = str(exc.value)
+            assert "malformed" in msg
+            assert "printer_variant" in msg
+            assert "printer_settings_id" in msg

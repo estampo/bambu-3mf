@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -182,6 +183,7 @@ class TestCmdPack:
         with (
             patch("bambox.cli.pack_gcode_3mf", side_effect=_touch_output_side_effect),
             patch("bambox.cli.build_project_settings", return_value={}) as mock_settings,
+            patch("bambox.cli.validate_printer_profile"),
         ):
             main(["pack", str(gcode), "-m", "a1mini"])
             assert mock_settings.call_args[1]["machine"] == "a1mini"
@@ -206,6 +208,7 @@ class TestCmdPack:
         with (
             patch("bambox.cli.pack_gcode_3mf", side_effect=_touch_output_side_effect),
             patch("bambox.cli.build_project_settings", return_value={}) as mock_settings,
+            patch("bambox.cli.validate_printer_profile"),
         ):
             main(["pack", str(gcode)])
             assert mock_settings.call_args[1]["machine"] == "a1mini"
@@ -240,6 +243,45 @@ class TestCmdPack:
             with pytest.raises(SystemExit, match="1"):
                 main(["pack", str(gcode)])
         assert "bad machine" in capsys.readouterr().err
+
+    def test_pack_unknown_printer_no_artifact(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Unknown printer → clean error + no artifact produced (#226)."""
+        gcode = tmp_path / "test.gcode"
+        gcode.write_text("G28\n")
+        output = tmp_path / "test.gcode.3mf"
+
+        with pytest.raises(SystemExit, match="1"):
+            main(["pack", str(gcode), "-o", str(output), "-m", "nonexistent_printer"])
+        err = capsys.readouterr().err
+        assert "Unknown printer 'nonexistent_printer'" in err
+        assert "p1s" in err
+        assert not output.exists()
+
+    def test_pack_malformed_profile_names_key(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Known printer, malformed profile → error names the missing key(s) (#226)."""
+        gcode = tmp_path / "test.gcode"
+        gcode.write_text("G28\n")
+        output = tmp_path / "test.gcode.3mf"
+
+        profiles_dir = tmp_path / "profiles"
+        profiles_dir.mkdir()
+        # Intentionally missing printer_variant, printer_settings_id, etc.
+        (profiles_dir / "base_broken.json").write_text(json.dumps({"printer_model": "Broken"}))
+
+        with (
+            patch("bambox.settings._DATA_DIR", profiles_dir),
+            patch("bambox.cura.PRINTER_MODEL_IDS", {"broken": "XYZ"}),
+            pytest.raises(SystemExit, match="1"),
+        ):
+            main(["pack", str(gcode), "-o", str(output), "-m", "broken"])
+        err = capsys.readouterr().err
+        assert "malformed" in err
+        assert "printer_variant" in err
+        assert not output.exists()
 
     def test_pack_nozzle_and_model_id(self, tmp_path: Path) -> None:
         gcode = tmp_path / "test.gcode"
@@ -289,7 +331,10 @@ class TestCmdRepack:
         threemf = tmp_path / "test.gcode.3mf"
         threemf.write_bytes(b"fake")
 
-        with patch("bambox.cli.repack_3mf") as mock_repack:
+        with (
+            patch("bambox.cli.repack_3mf") as mock_repack,
+            patch("bambox.cli.validate_printer_profile"),
+        ):
             main(["repack", str(threemf), "-m", "x1c"])
             assert mock_repack.call_args[1]["machine"] == "x1c"
             assert mock_repack.call_args[1]["filaments"] is None
@@ -298,7 +343,10 @@ class TestCmdRepack:
         threemf = tmp_path / "test.gcode.3mf"
         threemf.write_bytes(b"fake")
 
-        with patch("bambox.cli.repack_3mf") as mock_repack:
+        with (
+            patch("bambox.cli.repack_3mf") as mock_repack,
+            patch("bambox.cli.validate_printer_profile"),
+        ):
             main(["repack", str(threemf), "-f", "PETG", "-m", "a1mini"])
             assert mock_repack.call_args[1]["filaments"] == ["PETG"]
             assert mock_repack.call_args[1]["machine"] == "a1mini"
