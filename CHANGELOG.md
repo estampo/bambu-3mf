@@ -5,6 +5,23 @@ This changelog is managed by [towncrier](https://towncrier.readthedocs.io/).
 
 <!-- towncrier release notes start -->
 
+## 0.4.5 — 2026-04-20
+
+### Features
+
+- `bambox pack` and `bambox repack` now fail loudly at entry when the requested printer has no bundled profile, no firmware model-ID mapping, or a malformed base profile — surfacing the problem at pack time rather than as a cryptic firmware rejection at print time. ([#226](https://github.com/estampo/bambox/pull/226))
+- `bambox print` warns when the sliced G-code's `curr_bed_type` differs from the `plate_type` configured for the target printer in `credentials.toml`, helping catch first-layer nozzle-crash risk before sending the job. ([#233](https://github.com/estampo/bambox/pull/233))
+
+### Bugfixes
+
+- Fix README documenting the wrong credentials path (`~/.config/estampo/...` → `~/.config/bambox/...`); the code already used the correct path. ([#229](https://github.com/estampo/bambox/pull/229))
+- `bambox pack` now derives `printer_model_id` from the `-m/--machine` flag (via `PRINTER_MODEL_IDS`) when neither `--printer-model-id` nor a `BAMBOX_PRINTER` header is provided. Previously, callers that only passed `-m` — including estampo's CuraEngine pipeline — produced archives that tripped W001 in `bambox validate`. ([#235](https://github.com/estampo/bambox/pull/235))
+
+### Misc
+
+- Documentation: add "What bambox is — and isn't", a supported printers/filaments table, a "How packing works" explainer, and a Credits & Attribution section linking `THIRD-PARTY-NOTICES`. Ship `THIRD-PARTY-NOTICES` inside the installed wheel. ([#225](https://github.com/estampo/bambox/pull/225))
+
+
 ## 0.4.4 — 2026-04-18
 
 ### Features
