@@ -274,6 +274,79 @@ def _format_status(
     return "\n".join(lines)
 
 
+def _extract_sliced_bed_type(threemf: Path) -> str | None:
+    """Return the ``curr_bed_type`` recorded in the 3MF, or ``None`` if unreadable."""
+    import zipfile
+
+    try:
+        with zipfile.ZipFile(threemf, "r") as z:
+            raw = z.read("Metadata/project_settings.config")
+    except (zipfile.BadZipFile, KeyError, OSError):
+        return None
+    try:
+        data = json.loads(raw)
+    except (ValueError, TypeError):
+        return None
+    value = data.get("curr_bed_type")
+    return value if isinstance(value, str) and value else None
+
+
+def _warn_if_bed_type_mismatch(threemf: Path, configured_plate: str | None) -> None:
+    """Warn when the sliced bed type differs from the configured physical plate.
+
+    Why: OrcaSlicer's default plate is "Cool Plate", but many users have a
+    Textured PEI Plate installed — printing with the wrong first-layer Z can
+    crash the nozzle. This is the last safety check before G-code reaches
+    the machine.
+    """
+    if not configured_plate:
+        return
+    sliced = _extract_sliced_bed_type(threemf)
+    if not sliced:
+        return
+    if sliced.casefold() == configured_plate.casefold():
+        return
+    ui.warn(
+        f"This G-code was sliced for '{sliced}' but your printer is configured "
+        f"with '{configured_plate}'. Printing as-is risks a nozzle crash on the "
+        f"first layer. Re-slice with bed_type = '{configured_plate}' in "
+        f"estampo.toml, or confirm the correct plate is installed."
+    )
+
+
+def _get_printer_plate_type(printer_name: str | None, creds_path: Path | None) -> str | None:
+    """Return the ``plate_type`` field of the resolved printer, or ``None``.
+
+    Mirrors the resolution logic of :func:`_resolve_printer` but returns only
+    the configured plate. A missing credentials file or missing printer entry
+    is treated as "unconfigured" — the caller should not warn in that case.
+    """
+    import tomllib
+
+    if creds_path:
+        path = creds_path
+    else:
+        from bambox.credentials import _credentials_path
+
+        path = _credentials_path()
+    if not path.exists():
+        return None
+    try:
+        with open(path, "rb") as f:
+            raw = tomllib.load(f)
+    except (OSError, tomllib.TOMLDecodeError):
+        return None
+    printers = raw.get("printers", {})
+    if printer_name:
+        entry = printers.get(printer_name)
+    else:
+        entry = next((p for p in printers.values() if p.get("serial")), None)
+    if not entry:
+        return None
+    plate = entry.get("plate_type")
+    return plate if isinstance(plate, str) and plate else None
+
+
 def _show_print_info(threemf: Path) -> None:
     """Display print metadata (time, weight, layers, filaments) from a 3MF."""
     import xml.etree.ElementTree as ET
@@ -905,6 +978,9 @@ def print_cmd(
         )
 
     _show_print_info(threemf)
+
+    configured_plate = _get_printer_plate_type(printer, credentials)
+    _warn_if_bed_type_mismatch(threemf, configured_plate)
 
     if dry_run:
         if not no_ams_mapping:

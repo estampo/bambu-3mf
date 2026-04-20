@@ -1,0 +1,1 @@
+`bambox print` warns when the sliced G-code's `curr_bed_type` differs from the `plate_type` configured for the target printer in `credentials.toml`, helping catch first-layer nozzle-crash risk before sending the job.
