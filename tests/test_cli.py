@@ -188,6 +188,32 @@ class TestCmdPack:
             main(["pack", str(gcode), "-m", "a1mini"])
             assert mock_settings.call_args[1]["machine"] == "a1mini"
 
+    def test_pack_derives_printer_model_id_from_machine(self, tmp_path: Path) -> None:
+        """``-m p1s`` alone should set ``printer_model_id=C12`` so W001 stays quiet."""
+        gcode = tmp_path / "test.gcode"
+        gcode.write_text("G28\n")
+
+        with (
+            patch("bambox.cli.pack_gcode_3mf", side_effect=_touch_output_side_effect) as mock_pack,
+            patch("bambox.cli.build_project_settings", return_value={}),
+        ):
+            main(["pack", str(gcode), "-m", "p1s"])
+            info = mock_pack.call_args[1]["slice_info"]
+            assert info.printer_model_id == "C12"
+
+    def test_pack_explicit_printer_model_id_wins(self, tmp_path: Path) -> None:
+        """Explicit ``--printer-model-id`` overrides the -m fallback."""
+        gcode = tmp_path / "test.gcode"
+        gcode.write_text("G28\n")
+
+        with (
+            patch("bambox.cli.pack_gcode_3mf", side_effect=_touch_output_side_effect) as mock_pack,
+            patch("bambox.cli.build_project_settings", return_value={}),
+        ):
+            main(["pack", str(gcode), "-m", "p1s", "--printer-model-id", "OVERRIDE"])
+            info = mock_pack.call_args[1]["slice_info"]
+            assert info.printer_model_id == "OVERRIDE"
+
     def test_pack_with_filament_flag(self, tmp_path: Path) -> None:
         gcode = tmp_path / "test.gcode"
         gcode.write_text("G28\n")

@@ -1,0 +1,1 @@
+`bambox pack` now derives `printer_model_id` from the `-m/--machine` flag (via `PRINTER_MODEL_IDS`) when neither `--printer-model-id` nor a `BAMBOX_PRINTER` header is provided. Previously, callers that only passed `-m` — including estampo's CuraEngine pipeline — produced archives that tripped W001 in `bambox validate`.
