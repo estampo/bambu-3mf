@@ -1,0 +1,1 @@
+Fix README documenting the wrong credentials path (`~/.config/estampo/...` → `~/.config/bambox/...`); the code already used the correct path.

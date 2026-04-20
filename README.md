@@ -208,7 +208,7 @@ Authenticate with Bambu Cloud and save printer credentials.
 bambox login
 ```
 
-Credentials are stored in `~/.config/estampo/credentials.toml`.
+Credentials are stored in `~/.config/bambox/credentials.toml`.
 
 ### `bambox print` — Send to printer
 
@@ -367,7 +367,7 @@ from bambox.validate import validate_3mf
 | `assemble` | G-code component assembly (start + toolpath + end) |
 | `thumbnail` | G-code-to-PNG rendering (top-down view) |
 | `toolpath` | Synthetic toolpath generation for testing |
-| `credentials` | Credential loading and storage (`~/.config/estampo/credentials.toml`) |
+| `credentials` | Credential loading and storage (`~/.config/bambox/credentials.toml`) |
 | `auth` | Bambu Cloud authentication |
 | `gcode_compat` | G-code rewriting for multi-filament compatibility |
 | `ui` | Rich console formatting, color swatches, interactive prompts |
