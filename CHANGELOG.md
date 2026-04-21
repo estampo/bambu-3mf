@@ -5,6 +5,13 @@ This changelog is managed by [towncrier](https://towncrier.readthedocs.io/).
 
 <!-- towncrier release notes start -->
 
+## 0.4.6 — 2026-04-21
+
+### Bugfixes
+
+- Bridge daemon Docker port is now published only on 127.0.0.1, preventing unauthenticated LAN access to the daemon's cloud-print endpoints. ([#237](https://github.com/estampo/bambox/pull/237))
+
+
 ## 0.4.5 — 2026-04-20
 
 ### Features
