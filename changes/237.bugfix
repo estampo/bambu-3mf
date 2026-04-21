@@ -1,0 +1,1 @@
+Bridge daemon Docker port is now published only on 127.0.0.1, preventing unauthenticated LAN access to the daemon's cloud-print endpoints.

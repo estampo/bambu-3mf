@@ -1340,7 +1340,7 @@ def start(
                 "--platform",
                 "linux/amd64",
                 "-p",
-                "8765:8765",
+                "127.0.0.1:8765:8765",
                 "-v",
                 f"{token_real}:/tmp/credentials.json:ro",
                 DOCKER_IMAGE,

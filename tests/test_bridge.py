@@ -795,6 +795,22 @@ class TestStartDaemonDocker:
         assert DOCKER_DAEMON_CONTAINER in docker_run_cmd
         assert DOCKER_IMAGE in docker_run_cmd
 
+    def test_publishes_port_only_on_loopback(self, tmp_path):
+        token = tmp_path / "creds.json"
+        token.write_text("{}")
+        ok = subprocess.CompletedProcess([], returncode=0, stdout="", stderr="")
+        calls: list[list[str]] = []
+
+        def fake_run(cmd, **kwargs):
+            calls.append(list(cmd))
+            return ok
+
+        with patch("bambox.bridge.subprocess.run", side_effect=fake_run):
+            _start_daemon_docker(token)
+        docker_run_cmd = calls[2]
+        port_idx = docker_run_cmd.index("-p")
+        assert docker_run_cmd[port_idx + 1] == "127.0.0.1:8765:8765"
+
     def test_returns_false_on_docker_run_failure(self, tmp_path):
         token = tmp_path / "creds.json"
         token.write_text("{}")
