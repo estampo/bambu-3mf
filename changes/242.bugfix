@@ -1,0 +1,1 @@
+repack_3mf now backs up the original file before overwriting it, and restores it automatically if the write fails.

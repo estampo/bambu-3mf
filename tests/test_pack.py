@@ -13,6 +13,8 @@ from io import BytesIO
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
+import pytest
+
 from bambox.pack import (
     BAMBU_STUDIO_VERSION,
     FilamentInfo,
@@ -729,6 +731,34 @@ class TestRepack3mf:
         with zipfile.ZipFile(out) as z:
             si = z.read("Metadata/slice_info.config").decode()
             assert 'value="original"' in si
+
+    def test_repack_creates_and_removes_backup(self, tmp_path: Path) -> None:
+        """repack_3mf writes a .bak alongside the file and removes it on success."""
+        from bambox.pack import repack_3mf
+
+        out = self._make_3mf(tmp_path)
+        original_bytes = out.read_bytes()
+        repack_3mf(out)
+        backup = out.with_name(out.name + ".bak")
+        assert not backup.exists(), "backup should be removed after successful repack"
+        assert out.read_bytes() != original_bytes, "repacked file should differ from original"
+
+    def test_repack_restores_backup_on_failure(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """repack_3mf restores the original file if the write step raises."""
+        from bambox.pack import repack_3mf
+
+        out = self._make_3mf(tmp_path)
+        original_bytes = out.read_bytes()
+
+        def _fail(_data: bytes) -> None:
+            raise OSError("disk full")
+
+        monkeypatch.setattr(out.__class__, "write_bytes", lambda _self, data: _fail(data))
+        with pytest.raises(OSError, match="disk full"):
+            repack_3mf(out)
+        assert out.read_bytes() == original_bytes, "original should be restored after failed repack"
 
 
 # ---------------------------------------------------------------------------

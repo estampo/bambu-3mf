@@ -572,7 +572,14 @@ def repack_3mf(
             if plate_json_override is not None:
                 zout.writestr(_PLATE_JSON_PATH, plate_json_override)
 
-    path.write_bytes(buf.getvalue())
+    backup = path.with_name(path.name + ".bak")
+    path.rename(backup)
+    try:
+        path.write_bytes(buf.getvalue())
+    except Exception:
+        backup.rename(path)
+        raise
+    backup.unlink()
 
 
 # ---------------------------------------------------------------------------
