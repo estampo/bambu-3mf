@@ -843,10 +843,3 @@ class TestBambuStudioVersion:
         info = SliceInfo()
         assert info.client_version == BAMBU_STUDIO_VERSION
         assert info.application == f"BambuStudio-{BAMBU_STUDIO_VERSION}"
-
-    def test_auth_headers_use_constant(self) -> None:
-        """auth.py SLICER_HEADERS must use the same version constant."""
-        from bambox.auth import SLICER_HEADERS
-
-        assert SLICER_HEADERS["X-BBL-Client-Version"] == BAMBU_STUDIO_VERSION
-        assert BAMBU_STUDIO_VERSION in SLICER_HEADERS["User-Agent"]

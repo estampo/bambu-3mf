@@ -1,0 +1,1 @@
+Extract cloud printing into a separate `boo-cloud` project; remove `bridge.py`, `credentials.py`, `auth.py` and all cloud CLI commands (`login`, `print`, `cancel`, `status`, `daemon`) from bambox.
