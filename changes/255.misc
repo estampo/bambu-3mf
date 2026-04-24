@@ -1,1 +1,0 @@
-Add ``docs/gcode-3mf-format.md``: guide to the Bambu Connect-compatible ``.gcode.3mf`` format and the four post-processing fixes required after OrcaSlicer CLI output.

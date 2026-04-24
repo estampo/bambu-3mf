@@ -1,1 +1,0 @@
-Thumbnails now generated as RGBA at 512×512, fixing Bambu Studio, Handy app, and printer LCD showing the Bambu logo placeholder instead of the print preview.
