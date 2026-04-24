@@ -584,7 +584,7 @@ def _autodetect_machine_filaments(
     Returns (machine, filaments) if a matching bambox profile exists, else
     (None, None) so the caller falls back to fixup_project_settings.
     """
-    from bambox.settings import available_machines, available_filaments
+    from bambox.settings import available_filaments, available_machines
 
     printer_model = str(orca_ps.get("printer_model", ""))
     machine = _PRINTER_MODEL_TO_MACHINE.get(printer_model)
