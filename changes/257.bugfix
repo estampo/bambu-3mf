@@ -1,0 +1,1 @@
+Strip ``;MESH:`` path comments from CuraEngine G-code output to avoid leaking internal Docker container paths.
