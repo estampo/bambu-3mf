@@ -1,0 +1,1 @@
+Fix W003 false weight when OrcaSlicer emits empty weight and filament_density=0 by extracting weight from G-code footer

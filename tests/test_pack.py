@@ -317,6 +317,42 @@ class TestSliceInfo:
         assert required_keys <= our_keys
 
 
+class TestPatchSliceInfoWeight:
+    """Tests for _patch_slice_info_weight and _extract_weight_from_gcode."""
+
+    def test_empty_string_weight_fixed_from_gcode(self) -> None:
+        from bambox.pack import _extract_weight_from_gcode, _patch_slice_info_weight
+
+        si = (
+            '<?xml version="1.0" encoding="UTF-8"?>\n<config><plate>'
+            '<metadata key="weight" value=""/>'
+            '<filament id="1" used_g="0.00"/>'
+            "</plate></config>"
+        )
+        gcode = "; filament used [cm3] = 6.86\n"
+        fallback = _extract_weight_from_gcode(gcode, "PLA")
+        assert fallback == pytest.approx(8.51, abs=0.01)
+        patched = _patch_slice_info_weight(si, fallback_g=fallback)
+        assert patched is not None
+        assert 'value="8.51"' in patched
+
+    def test_explicit_g_preferred_over_cm3(self) -> None:
+        from bambox.pack import _extract_weight_from_gcode
+
+        gcode = "; filament used [cm3] = 6.86\n; filament used [g] = 9.00\n"
+        assert _extract_weight_from_gcode(gcode, "PLA") == 9.00
+
+    def test_nonzero_weight_unchanged(self) -> None:
+        from bambox.pack import _patch_slice_info_weight
+
+        si = (
+            '<?xml version="1.0" encoding="UTF-8"?>\n<config><plate>'
+            '<metadata key="weight" value="3.64"/>'
+            "</plate></config>"
+        )
+        assert _patch_slice_info_weight(si, fallback_g=99.0) is None
+
+
 class TestXmlEscaping:
     """Verify that special XML characters in user-controlled fields are escaped."""
 
