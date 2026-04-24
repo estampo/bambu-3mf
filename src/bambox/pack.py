@@ -424,6 +424,39 @@ def _patch_slice_info_printer_model(xml_str: str, printer_model_id: str) -> str:
     )
 
 
+def _patch_slice_info_weight(xml_str: str) -> str | None:
+    """Fix weight=0 in slice_info.config by summing filament used_g values.
+
+    OrcaSlicer occasionally emits weight="0" in the plate metadata while the
+    per-filament ``used_g`` attributes are correct.  Returns the patched XML
+    or None if the weight is already non-zero (no change needed).
+    """
+    import xml.etree.ElementTree as ET
+
+    try:
+        root = ET.fromstring(xml_str)
+    except ET.ParseError:
+        return None
+    plate = root.find("plate")
+    if plate is None:
+        return None
+    meta = {el.get("key", ""): el.get("value", "") for el in plate.findall("metadata")}
+    weight_str = meta.get("weight", "0")
+    try:
+        if float(weight_str) > 0:
+            return None  # already correct
+    except ValueError:
+        return None
+    total_g = sum(float(f.get("used_g", "0") or "0") for f in plate.findall("filament"))
+    if total_g <= 0:
+        return None  # nothing to fix
+    return re.sub(
+        r'(<metadata key="weight" value=")[^"]*(")',
+        rf"\g<1>{total_g:.2f}\g<2>",
+        xml_str,
+    )
+
+
 def repack_3mf(
     path: Path,
     *,
@@ -510,12 +543,18 @@ def repack_3mf(
         except KeyError:
             si_raw = None
         si_patched: str | None = None
-        if si_raw is not None and machine:
-            from bambox.cura import PRINTER_MODEL_IDS
+        if si_raw is not None:
+            # Fix weight=0 when per-filament used_g values are available
+            weight_fix = _patch_slice_info_weight(si_raw)
+            if weight_fix is not None:
+                si_patched = weight_fix
+            if machine:
+                from bambox.cura import PRINTER_MODEL_IDS
 
-            model_id = PRINTER_MODEL_IDS.get(machine.lower(), "")
-            if model_id:
-                si_patched = _patch_slice_info_printer_model(si_raw, model_id)
+                model_id = PRINTER_MODEL_IDS.get(machine.lower(), "")
+                if model_id:
+                    base = si_patched if si_patched is not None else si_raw
+                    si_patched = _patch_slice_info_printer_model(base, model_id)
 
         # --- Fix thumbnails ---
         thumb_files = [
