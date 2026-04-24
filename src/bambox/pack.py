@@ -401,6 +401,7 @@ def fixup_model_settings(xml: str, min_slots: int = MIN_SLOTS) -> str:
     result = re.sub(r'key="filament_maps" value="([^"]*)"', _pad_maps, xml)
 
     extra_keys = {
+        "filament_volume_maps": " ".join(["0"] * min_slots),
         "thumbnail_file": "Metadata/plate_1.png",
         "thumbnail_no_light_file": "Metadata/plate_no_light_1.png",
         "top_file": "Metadata/top_1.png",
@@ -415,6 +416,43 @@ def fixup_model_settings(xml: str, min_slots: int = MIN_SLOTS) -> str:
     return result
 
 
+def _patch_slice_info_compat(xml_str: str, min_slots: int = MIN_SLOTS) -> str:
+    """Add missing BambuStudio 02.05 keys to OrcaSlicer slice_info.config.
+
+    OrcaSlicer 2.x omits several metadata keys that Bambu Connect expects:
+    - X-BBL-Client-Version (left blank by OrcaSlicer)
+    - extruder_type / nozzle_volume_type
+    - limit_filament_maps
+    Pads filament_maps to min_slots if it is a single token.
+    """
+    # Set client version if blank
+    result = re.sub(
+        r'(<header_item key="X-BBL-Client-Version" value=")(")',
+        rf"\g<1>{BAMBU_STUDIO_VERSION}\g<2>",
+        xml_str,
+    )
+
+    # Pad filament_maps inside slice_info (separate from model_settings)
+    def _pad_si_maps(m: re.Match[str]) -> str:
+        parts = m.group(1).split()
+        while len(parts) < min_slots:
+            parts.append(parts[-1] if parts else "1")
+        return f'key="filament_maps" value="{" ".join(parts)}"'
+
+    result = re.sub(r'key="filament_maps" value="([^"]*)"', _pad_si_maps, result)
+    # Add missing keys before </plate>
+    for key, val in [
+        ("extruder_type", "0"),
+        ("nozzle_volume_type", "0"),
+        ("limit_filament_maps", " ".join(["0"] * min_slots)),
+    ]:
+        if f'key="{key}"' not in result:
+            result = result.replace(
+                "  </plate>", f'    <metadata key="{key}" value="{val}"/>\n  </plate>'
+            )
+    return result
+
+
 def _patch_slice_info_printer_model(xml_str: str, printer_model_id: str) -> str:
     """Replace the printer_model_id value in slice_info.config XML."""
     return re.sub(
@@ -424,12 +462,12 @@ def _patch_slice_info_printer_model(xml_str: str, printer_model_id: str) -> str:
     )
 
 
-def _patch_slice_info_weight(xml_str: str) -> str | None:
-    """Fix weight=0 in slice_info.config by summing filament used_g values.
+def _patch_slice_info_weight(xml_str: str, fallback_g: float = 0.0) -> str | None:
+    """Fix weight=0 or weight="" in slice_info.config.
 
-    OrcaSlicer occasionally emits weight="0" in the plate metadata while the
-    per-filament ``used_g`` attributes are correct.  Returns the patched XML
-    or None if the weight is already non-zero (no change needed).
+    Tries per-filament ``used_g`` sums first; falls back to ``fallback_g``
+    (e.g. computed from G-code footer) when those are also zero.
+    Returns the patched XML or None if weight is already non-zero.
     """
     import xml.etree.ElementTree as ET
 
@@ -443,11 +481,14 @@ def _patch_slice_info_weight(xml_str: str) -> str | None:
     meta = {el.get("key", ""): el.get("value", "") for el in plate.findall("metadata")}
     weight_str = meta.get("weight", "0")
     try:
-        if float(weight_str) > 0:
-            return None  # already correct
+        current_weight = float(weight_str)
     except ValueError:
-        return None
+        current_weight = 0.0  # OrcaSlicer emits weight="" when filament_density=0
+    if current_weight > 0:
+        return None  # already correct
     total_g = sum(float(f.get("used_g", "0") or "0") for f in plate.findall("filament"))
+    if total_g <= 0:
+        total_g = fallback_g
     if total_g <= 0:
         return None  # nothing to fix
     return re.sub(
@@ -455,6 +496,46 @@ def _patch_slice_info_weight(xml_str: str) -> str | None:
         rf"\g<1>{total_g:.2f}\g<2>",
         xml_str,
     )
+
+
+# Density fallback for weight computation when filament_density=0 in the profile.
+# Used only when slice_info has no usable used_g values.
+_FILAMENT_DENSITY: dict[str, float] = {
+    "PLA": 1.24,
+    "PETG": 1.27,
+    "ABS": 1.04,
+    "ASA": 1.07,
+    "PA": 1.14,
+    "PC": 1.20,
+    "TPU": 1.20,
+    "PVA": 1.23,
+}
+_DENSITY_DEFAULT = 1.24  # PLA
+
+
+def _extract_weight_from_gcode(gcode_str: str, filament_type: str = "") -> float:
+    """Extract total filament weight in grams from OrcaSlicer G-code footer.
+
+    Prefers an explicit ``; filament used [g]`` comment; falls back to
+    ``; filament used [cm3]`` multiplied by the filament density.
+    """
+    total_g = 0.0
+    total_cm3 = 0.0
+    for line in gcode_str.splitlines():
+        if not line.startswith(";"):
+            continue
+        if m := re.match(r";\s*(?:total )?filament used \[g\]\s*=\s*(.+)", line):
+            vals = [float(v) for v in m.group(1).split(",") if v.strip()]
+            total_g = sum(vals)
+        elif m := re.match(r";\s*(?:total )?filament used \[cm3\]\s*=\s*(.+)", line):
+            vals = [float(v) for v in m.group(1).split(",") if v.strip()]
+            total_cm3 = sum(vals)
+    if total_g > 0:
+        return round(total_g, 2)
+    if total_cm3 > 0:
+        density = _FILAMENT_DENSITY.get(filament_type.upper(), _DENSITY_DEFAULT)
+        return round(total_cm3 * density, 2)
+    return 0.0
 
 
 def repack_3mf(
@@ -537,24 +618,49 @@ def repack_3mf(
                 f'    <metadata key="pattern_bbox_file" value="{_PLATE_JSON_PATH}"/>\n  </plate>',
             )
 
-        # --- Fix slice_info.config (printer_model_id) ---
+        # --- Fix slice_info.config ---
         try:
             si_raw = zin.read("Metadata/slice_info.config").decode()
         except KeyError:
             si_raw = None
         si_patched: str | None = None
+        gcode_str: str | None = None
         if si_raw is not None:
-            # Fix weight=0 when per-filament used_g values are available
             weight_fix = _patch_slice_info_weight(si_raw)
             if weight_fix is not None:
                 si_patched = weight_fix
+            else:
+                # used_g=0 or weight="" — try extracting weight from G-code footer
+                import xml.etree.ElementTree as ET
+
+                try:
+                    _si_root = ET.fromstring(si_raw)
+                    _plate = _si_root.find("plate")
+                    _filament_type = (
+                        (_plate.find("filament") or ET.Element("f")).get("type", "")
+                        if _plate is not None
+                        else ""
+                    )
+                except ET.ParseError:
+                    _filament_type = ""
+                if gcode_str is None:
+                    try:
+                        gcode_str = zin.read("Metadata/plate_1.gcode").decode(errors="replace")
+                    except KeyError:
+                        gcode_str = ""
+                fallback_g = _extract_weight_from_gcode(gcode_str, _filament_type)
+                weight_fix2 = _patch_slice_info_weight(si_raw, fallback_g=fallback_g)
+                if weight_fix2 is not None:
+                    si_patched = weight_fix2
+            # Apply BambuStudio compat patches (version, missing keys, padded maps)
+            base = si_patched if si_patched is not None else si_raw
+            si_patched = _patch_slice_info_compat(base, min_slots=min_slots)
             if machine:
                 from bambox.cura import PRINTER_MODEL_IDS
 
                 model_id = PRINTER_MODEL_IDS.get(machine.lower(), "")
                 if model_id:
-                    base = si_patched if si_patched is not None else si_raw
-                    si_patched = _patch_slice_info_printer_model(base, model_id)
+                    si_patched = _patch_slice_info_printer_model(si_patched, model_id)
 
         # --- Fix thumbnails ---
         thumb_files = [
@@ -565,9 +671,6 @@ def repack_3mf(
             "Metadata/pick_1.png",
         ]
         thumbnail_overrides: dict[str, bytes] = {}
-
-        # Try to generate thumbnails from the packed G-code
-        gcode_str: str | None = None
         for fname in thumb_files:
             try:
                 existing = zin.read(fname)
