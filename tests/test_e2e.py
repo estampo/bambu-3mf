@@ -286,6 +286,27 @@ class TestRepack:
             # BC-required keys should be added
             assert "bbl_use_printhost" in ps
 
+    def test_autodetects_machine_from_printer_model(self, tmp_path: Path) -> None:
+        """Repack auto-detects machine from printer_model even when machine is pre-set."""
+        threemf = tmp_path / "test.gcode.3mf"
+        _make_orca_3mf(
+            threemf,
+            project_settings={
+                "printer_model": "Bambu Lab P1S",
+                "filament_type": ["PLA"],
+                "filament_colour": ["#F2754E"],
+                "nozzle_diameter": ["0.4"],
+                "temperature_vitrification": ["45"],
+            },
+        )
+
+        # Simulate CLI default: machine="p1s" but no filament specified
+        repack_3mf(threemf, machine="p1s")
+
+        with zipfile.ZipFile(threemf) as z:
+            ps = json.loads(z.read("Metadata/project_settings.config"))
+            assert len(ps) > 500, "Should regenerate from profiles, not patch OrcaSlicer export"
+
     def test_regenerates_settings_from_profiles(self, tmp_path: Path) -> None:
         """Repack with machine+filament regenerates project_settings from profiles."""
         threemf = tmp_path / "test.gcode.3mf"

@@ -647,8 +647,14 @@ def repack_3mf(
         except KeyError:
             ps_raw = None
 
-        if not machine and ps_raw is not None:
-            machine, filaments = _autodetect_machine_filaments(json.loads(ps_raw), filaments or [])
+        if (not machine or not filaments) and ps_raw is not None:
+            detected_machine, detected_filaments = _autodetect_machine_filaments(
+                json.loads(ps_raw), filaments or []
+            )
+            if not machine:
+                machine = detected_machine
+            if not filaments:
+                filaments = detected_filaments
 
         if machine and filaments:
             from bambox.settings import build_project_settings
