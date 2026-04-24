@@ -8,8 +8,8 @@ import re
 
 def gcode_thumbnail(
     gcode: str | bytes,
-    width: int = 256,
-    height: int = 256,
+    width: int = 512,
+    height: int = 512,
 ) -> bytes:
     """Render a top-down toolpath preview from G-code as a PNG.
 
@@ -77,10 +77,10 @@ def gcode_thumbnail(
         return (int(ox + (mx - xmin) * scale), int(oy + (ymax - my) * scale))
 
     # Colours
-    bg = (25, 25, 30)
-    extrude_color = (0, 180, 160)  # teal
+    bg = (25, 25, 30, 255)
+    extrude_color = (0, 180, 160, 255)  # teal
 
-    img = Image.new("RGB", (width, height), bg)
+    img = Image.new("RGBA", (width, height), bg)
     draw = ImageDraw.Draw(img)
 
     # Draw extrusion moves
@@ -94,13 +94,13 @@ def gcode_thumbnail(
     return buf.getvalue()
 
 
-def _placeholder(width: int = 256, height: int = 256) -> bytes:
+def _placeholder(width: int = 512, height: int = 512) -> bytes:
     """Minimal branded placeholder when no toolpath data is available."""
     from PIL import Image, ImageDraw
 
-    bg = (25, 25, 30)
-    accent = (0, 150, 136)
-    img = Image.new("RGB", (width, height), bg)
+    bg = (25, 25, 30, 255)
+    accent = (0, 150, 136, 255)
+    img = Image.new("RGBA", (width, height), bg)
     draw = ImageDraw.Draw(img)
 
     # Simple bed rectangle with accent border

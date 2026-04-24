@@ -528,7 +528,9 @@ def repack_3mf(
                     gcode_str = gcode_bytes.decode(errors="replace")
                 except KeyError:
                     gcode_str = ""
-            if gcode_str:
+            if fname in ("Metadata/top_1.png", "Metadata/pick_1.png"):
+                thumbnail_overrides[fname] = _PLACEHOLDER_PNG
+            elif gcode_str:
                 try:
                     from bambox.thumbnail import gcode_thumbnail
 
@@ -674,8 +676,8 @@ def pack_gcode_3mf(
                         "Metadata/plate_1.png": main_png,
                         "Metadata/plate_no_light_1.png": main_png,
                         "Metadata/plate_1_small.png": small_png,
-                        "Metadata/top_1.png": main_png,
-                        "Metadata/pick_1.png": main_png,
+                        "Metadata/top_1.png": _PLACEHOLDER_PNG,
+                        "Metadata/pick_1.png": _PLACEHOLDER_PNG,
                     }
                 except Exception:
                     log.debug("Thumbnail generation failed, using placeholders", exc_info=True)
