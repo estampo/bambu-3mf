@@ -106,6 +106,20 @@ def test_cura_movement_preserved():
     assert "G1 X10 Y10 E1" in result
 
 
+def test_cura_mesh_comments_stripped():
+    gcode = (
+        b";FLAVOR:Marlin\n"
+        b";LAYER_COUNT:1\n"
+        b";MESH:/work/output/.cura-staging/plate.stl\n"
+        b";LAYER:0\n"
+        b"G1 X10 Y10 E1\n"
+        b";MESH:NONMESH\n"
+    )
+    result = translate_to_bbl(gcode).decode()
+    assert ";MESH:" not in result
+    assert "G1 X10 Y10 E1" in result
+
+
 # --- translate_to_bbl (PrusaSlicer) ---
 
 

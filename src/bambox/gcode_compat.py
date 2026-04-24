@@ -151,6 +151,7 @@ def _translate_cura(text: str) -> str:
         )
 
     text = re.sub(r";LAYER:(\d+)", _layer_sub, text)
+    text = re.sub(r"^;MESH:.*\n?", "", text, flags=re.MULTILINE)
     return text
 
 
