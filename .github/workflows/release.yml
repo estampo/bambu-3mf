@@ -113,12 +113,6 @@ jobs:
             echo "::error::Version mismatch: pyproject.toml=$TOML_VERSION, release=$VERSION"
             exit 1
           fi
-
-          CARGO_VERSION=$(grep -m1 '^version = ' bridge/Cargo.toml | sed 's/version = "\(.*\)"/\1/')
-          if [[ "$CARGO_VERSION" != "$VERSION" ]]; then
-            echo "::error::Version mismatch: bridge/Cargo.toml=$CARGO_VERSION, release=$VERSION"
-            exit 1
-          fi
           echo "::notice::Releasing version $VERSION"
 
   # ── Build package ───────────────────────────────────────────────────
@@ -274,6 +268,7 @@ jobs:
           skip-existing: true
 
   # ── Notify estampo of new release ────────────────────────────────────
+  # (bridge binary build was removed — bridge lives in estampo/boo-cloud)
   # Creates an issue on estampo/estampo so maintainers know to update
   # the bambox dependency. Skipped for pre-releases (rc, alpha, beta).
   notify-estampo:
@@ -301,22 +296,3 @@ jobs:
 
           _This issue was created automatically by the bambox release pipeline._"
 
-  # ── Trigger bridge binary build ─────────────────────────────────────
-  # Tags created by GITHUB_TOKEN don't trigger other workflows, so we
-  # explicitly dispatch the bridge build to attach native binaries to
-  # the release.
-  build-bridge:
-    needs: [version, create-tag]
-    if: |
-      always() &&
-      needs.version.result == 'success' &&
-      needs.create-tag.result == 'success'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Trigger bridge build
-        env:
-          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
-        run: |
-          gh workflow run build-bridge.yml \
-            --repo "${{ github.repository }}" \
-            --ref "v${{ needs.version.outputs.version }}"

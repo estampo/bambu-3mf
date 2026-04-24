@@ -1,0 +1,1 @@
+Remove bridge/ Rust source, build-bridge and publish-docker workflows, install scripts from bambox; bridge now lives in estampo/boo-cloud.
