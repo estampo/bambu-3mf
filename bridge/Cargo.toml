@@ -1,6 +1,6 @@
 [package]
 name = "bambox-bridge"
-version = "0.4.6"
+version = "0.4.7"
 edition = "2021"
 description = "Rust bridge daemon for Bambu Lab printers via libbambu_networking.so"
 license = "MIT"

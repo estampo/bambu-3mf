@@ -1,1 +1,0 @@
-Fix `repack` incorrectly replacing valid OrcaSlicer thumbnails with a 1×1 placeholder, which broke Bambu Connect

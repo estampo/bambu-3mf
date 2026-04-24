@@ -5,6 +5,26 @@ This changelog is managed by [towncrier](https://towncrier.readthedocs.io/).
 
 <!-- towncrier release notes start -->
 
+## 0.4.7 — 2026-04-24
+
+### Bugfixes
+
+- Thumbnails now generated as RGBA at 512×512, fixing Bambu Studio, Handy app, and printer LCD showing the Bambu logo placeholder instead of the print preview. ([#241](https://github.com/estampo/bambox/pull/241))
+- repack_3mf now backs up the original file before overwriting it, and restores it automatically if the write fails. ([#242](https://github.com/estampo/bambox/pull/242))
+- Fix `repack` incorrectly replacing valid OrcaSlicer thumbnails with a 1×1 placeholder, which broke Bambu Connect ([#243](https://github.com/estampo/bambox/pull/243))
+- Fix E002 false positive for OrcaSlicer BBL G-code and W003 weight=0 from slice_info.config ([#245](https://github.com/estampo/bambox/pull/245))
+- Fix W003 false weight when OrcaSlicer emits empty weight and filament_density=0 by extracting weight from G-code footer ([#247](https://github.com/estampo/bambox/pull/247))
+- Patch 3D/3dmodel.model Application version in repack ([#249](https://github.com/estampo/bambox/pull/249))
+- Auto-detect machine profile in repack for full BC-compatible project_settings ([#251](https://github.com/estampo/bambox/pull/251))
+- Fix Bambu Connect rejection: correct key ordering in ``slice_info.config`` and ``model_settings.config``, normalise ``plate_1.json`` ``bed_type`` to ``textured_plate``. ([#254](https://github.com/estampo/bambox/pull/254))
+- Strip ``;MESH:`` path comments from CuraEngine G-code output to avoid leaking internal Docker container paths. ([#257](https://github.com/estampo/bambox/pull/257))
+- Fix ``bambox repack`` silently using OrcaSlicer project_settings when ``--machine`` defaults are set but ``--filament`` is not specified, resulting in too few keys for Bambu Connect.
+
+### Misc
+
+- Add ``docs/gcode-3mf-format.md``: guide to the Bambu Connect-compatible ``.gcode.3mf`` format and the four post-processing fixes required after OrcaSlicer CLI output. ([#255](https://github.com/estampo/bambox/pull/255))
+
+
 ## 0.4.6 — 2026-04-21
 
 ### Bugfixes

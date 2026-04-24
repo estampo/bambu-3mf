@@ -1,1 +1,0 @@
-Fix ``bambox repack`` silently using OrcaSlicer project_settings when ``--machine`` defaults are set but ``--filament`` is not specified, resulting in too few keys for Bambu Connect.

@@ -1,1 +1,0 @@
-Fix Bambu Connect rejection: correct key ordering in ``slice_info.config`` and ``model_settings.config``, normalise ``plate_1.json`` ``bed_type`` to ``textured_plate``.
