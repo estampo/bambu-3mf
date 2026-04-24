@@ -20,7 +20,9 @@ We will acknowledge reports within 48 hours and aim to release a fix within 7 da
 
 bambox handles:
 - Archive construction (ZIP files with XML metadata)
-- Credential loading for cloud printing
-- Docker container execution for slicing and bridge communication
+- Docker container execution for CuraEngine slicing (`cura.py`)
 
-Security-sensitive areas include credential handling in `bridge.py` and subprocess invocation in `cura.py`.
+Security-sensitive areas include subprocess invocation in `cura.py`.
+
+Cloud printing, credential handling, and bridge communication are out of scope
+here — those live in [boo-cloud](https://github.com/estampo/boo-cloud).
