@@ -440,16 +440,20 @@ def _patch_slice_info_compat(xml_str: str, min_slots: int = MIN_SLOTS) -> str:
         return f'key="filament_maps" value="{" ".join(parts)}"'
 
     result = re.sub(r'key="filament_maps" value="([^"]*)"', _pad_si_maps, result)
-    # Add missing keys before </plate>
-    for key, val in [
-        ("extruder_type", "0"),
-        ("nozzle_volume_type", "0"),
-        ("limit_filament_maps", " ".join(["0"] * min_slots)),
-    ]:
+    # extruder_type and nozzle_volume_type must appear before printer_model_id
+    for key, val in [("extruder_type", "0"), ("nozzle_volume_type", "0")]:
         if f'key="{key}"' not in result:
             result = result.replace(
-                "  </plate>", f'    <metadata key="{key}" value="{val}"/>\n  </plate>'
+                '    <metadata key="printer_model_id"',
+                f'    <metadata key="{key}" value="{val}"/>\n    <metadata key="printer_model_id"',
+                1,
             )
+    # limit_filament_maps goes before </plate>
+    if 'key="limit_filament_maps"' not in result:
+        limit = " ".join(["0"] * min_slots)
+        result = result.replace(
+            "  </plate>", f'    <metadata key="limit_filament_maps" value="{limit}"/>\n  </plate>'
+        )
     return result
 
 
@@ -670,22 +674,36 @@ def repack_3mf(
         except KeyError:
             model_patched = None
 
-        # --- Fix model_settings.config ---
+        # --- Regenerate model_settings.config from scratch ---
+        # Patching the OrcaSlicer output produces wrong key ordering; BC is
+        # sensitive to the order. Regenerate cleanly, extracting filament_maps
+        # from the original if present.
         try:
             ms_raw = zin.read("Metadata/model_settings.config").decode()
-            ms_patched = fixup_model_settings(ms_raw, min_slots=min_slots)
+            _fm_match = re.search(r'key="filament_maps" value="([^"]*)"', ms_raw)
+            _fm_parts = _fm_match.group(1).split() if _fm_match else []
+            while len(_fm_parts) < min_slots:
+                _fm_parts.append(_fm_parts[-1] if _fm_parts else "1")
+            ms_patched: str | None = _model_settings_xml(
+                " ".join(_fm_parts), " ".join(["0"] * min_slots)
+            )
         except KeyError:
             ms_patched = None
 
-        # --- Fix plate_1.json (bounding-box / plate metadata) ---
+        # --- Fix plate_1.json ---
         _PLATE_JSON_PATH = "Metadata/plate_1.json"
         plate_json_override: str | None = None
         try:
-            zin.read(_PLATE_JSON_PATH)
+            _pj = json.loads(zin.read(_PLATE_JSON_PATH))
+            # BC requires textured_plate; OrcaSlicer may emit cool_plate or others
+            if _pj.get("bed_type") != "textured_plate":
+                _pj["bed_type"] = "textured_plate"
+                plate_json_override = json.dumps(_pj, separators=(",", ":"))
         except KeyError:
             # Generate a minimal plate_1.json so model_settings refs are valid
             colors = filament_colors or ["#F2754E"]
             plate_data: dict[str, object] = {
+                "bed_type": "textured_plate",
                 "filament_colors": colors,
                 "filament_ids": list(range(len(colors))),
                 "first_extruder": 0,
@@ -694,14 +712,6 @@ def repack_3mf(
                 "version": 2,
             }
             plate_json_override = json.dumps(plate_data, separators=(",", ":"))
-
-        # Add pattern_bbox_file ref to model_settings now that we know the file
-        # will exist (either already present or generated above)
-        if ms_patched and 'key="pattern_bbox_file"' not in ms_patched:
-            ms_patched = ms_patched.replace(
-                "  </plate>",
-                f'    <metadata key="pattern_bbox_file" value="{_PLATE_JSON_PATH}"/>\n  </plate>',
-            )
 
         # --- Fix slice_info.config ---
         try:
@@ -798,6 +808,8 @@ def repack_3mf(
                     zout.writestr(item, ms_patched)
                 elif item.filename == "Metadata/slice_info.config" and si_patched:
                     zout.writestr(item, si_patched)
+                elif item.filename == _PLATE_JSON_PATH and plate_json_override is not None:
+                    zout.writestr(item, plate_json_override)
                 else:
                     zout.writestr(item, zin.read(item.filename))
 
@@ -805,15 +817,13 @@ def repack_3mf(
             for fname, data in thumbnail_overrides.items():
                 zout.writestr(fname, data)
 
-            # Add project_settings if it didn't exist in the original
+            # Add files that didn't exist in the original
             if ps is not None and ps_raw is None:
                 zout.writestr(
                     "Metadata/project_settings.config",
                     json.dumps(ps, indent=4) + "\n",
                 )
-
-            # Add plate_1.json if it didn't exist in the original
-            if plate_json_override is not None:
+            if plate_json_override is not None and _PLATE_JSON_PATH not in zin.namelist():
                 zout.writestr(_PLATE_JSON_PATH, plate_json_override)
 
     backup = path.with_name(path.name + ".bak")

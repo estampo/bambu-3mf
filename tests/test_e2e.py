@@ -396,7 +396,7 @@ class TestRepack:
             assert 'key="pattern_bbox_file"' in ms
 
     def test_preserves_existing_plate_json(self, tmp_path: Path) -> None:
-        """Repack doesn't overwrite existing plate_1.json."""
+        """Repack keeps existing plate_1.json data and normalises bed_type."""
         threemf = tmp_path / "test.gcode.3mf"
         custom_plate = '{"custom":true}'
         with zipfile.ZipFile(threemf, "w") as z:
@@ -414,7 +414,9 @@ class TestRepack:
         repack_3mf(threemf)
 
         with zipfile.ZipFile(threemf) as z:
-            assert json.loads(z.read("Metadata/plate_1.json")) == {"custom": True}
+            plate = json.loads(z.read("Metadata/plate_1.json"))
+            assert plate["custom"] is True
+            assert plate["bed_type"] == "textured_plate"
 
 
 class TestCliRepack:
