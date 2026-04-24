@@ -462,6 +462,27 @@ def _patch_slice_info_printer_model(xml_str: str, printer_model_id: str) -> str:
     )
 
 
+def _patch_3dmodel(xml_str: str) -> str:
+    """Fix 3D/3dmodel.model for Bambu Connect.
+
+    OrcaSlicer writes Application as "BambuStudio-2.3.1"; BC expects
+    "BambuStudio-02.05.00.66".  Also adds ProfileCover, ProfileDescription,
+    and ProfileTitle metadata nodes if absent (present in BambuStudio output).
+    """
+    result = re.sub(
+        r'(<metadata name="Application">)[^<]*(</metadata>)',
+        rf"\g<1>BambuStudio-{BAMBU_STUDIO_VERSION}\g<2>",
+        xml_str,
+    )
+    for name in ("ProfileCover", "ProfileDescription", "ProfileTitle"):
+        if f'name="{name}"' not in result:
+            result = result.replace(
+                "<resources>",
+                f' <metadata name="{name}"></metadata>\n <resources>',
+            )
+    return result
+
+
 def _patch_slice_info_weight(xml_str: str, fallback_g: float = 0.0) -> str | None:
     """Fix weight=0 or weight="" in slice_info.config.
 
@@ -585,6 +606,13 @@ def repack_3mf(
         else:
             ps = None
 
+        # --- Fix 3D/3dmodel.model ---
+        try:
+            model_raw = zin.read("3D/3dmodel.model").decode()
+            model_patched: str | None = _patch_3dmodel(model_raw)
+        except KeyError:
+            model_patched = None
+
         # --- Fix model_settings.config ---
         try:
             ms_raw = zin.read("Metadata/model_settings.config").decode()
@@ -705,6 +733,8 @@ def repack_3mf(
             for item in zin.infolist():
                 if item.filename in thumbnail_overrides:
                     continue  # replaced below
+                elif item.filename == "3D/3dmodel.model" and model_patched is not None:
+                    zout.writestr(item, model_patched)
                 elif item.filename == "Metadata/project_settings.config" and ps is not None:
                     zout.writestr(item, json.dumps(ps, indent=4) + "\n")
                 elif item.filename == "Metadata/model_settings.config" and ms_patched:
