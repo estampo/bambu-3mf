@@ -302,7 +302,19 @@ def _check_temperature_commands(gcode: str, findings: list[Finding]) -> None:
 
 
 def _check_toolchange_feedrate(gcode: str, findings: list[Finding]) -> None:
-    """E002: M620.1 E feedrate must be >= 100 mm/min (linear, not volumetric)."""
+    """E002: M620.1 E feedrate must be >= 1 mm/min.
+
+    OrcaSlicer computes M620.1 E feedrate as
+    ``filament_max_volumetric_speed / 2.4053 * 60``, which can legitimately
+    produce values below 100 mm/min for low-speed filaments. Only flag values
+    so low (< 1 mm/min) that they must be a raw volumetric rate passed
+    without the linear conversion.
+
+    Skip entirely for BBL-format G-code (HEADER_BLOCK_START present) since
+    OrcaSlicer always applies the correct conversion formula.
+    """
+    if _RE_HEADER_START.search(gcode):
+        return  # OrcaSlicer output — feedrate is correctly computed
     for line in gcode.splitlines():
         stripped = line.strip()
         if stripped.startswith(";"):
@@ -310,13 +322,13 @@ def _check_toolchange_feedrate(gcode: str, findings: list[Finding]) -> None:
         m = _RE_TOOLCHANGE_FEEDRATE.search(stripped)
         if m:
             feedrate = float(m.group(1))
-            if feedrate < 100:
+            if feedrate < 1:
                 findings.append(
                     Finding(
                         Severity.ERROR,
                         "E002",
                         f"Toolchange feedrate too low: F{feedrate} "
-                        "(< 100 mm/min, likely raw volumetric)",
+                        "(< 1 mm/min, likely raw volumetric rate not converted to mm/min)",
                         stripped[:120],
                     )
                 )

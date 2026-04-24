@@ -1,0 +1,1 @@
+Fix E002 false positive for OrcaSlicer BBL G-code and W003 weight=0 from slice_info.config

@@ -152,15 +152,26 @@ class TestTemperatureCommands:
 # ---------------------------------------------------------------------------
 
 
+_NON_BBL_GCODE = "G1 X10 Y10 E1 F600\n"  # no HEADER_BLOCK_START
+
+
 class TestToolchangeFeedrate:
     def test_low_feedrate_detected(self, tmp_path: Path) -> None:
-        gcode = MINIMAL_GCODE + "M620.1 E F12 T240\n"
+        # Non-BBL G-code with sub-1 mm/min feedrate (likely raw volumetric)
+        gcode = _NON_BBL_GCODE + "M620.1 E F0.5 T240\n"
         path = build_valid_3mf(tmp_path, gcode=gcode)
         result = validate_3mf(path)
         assert any(f.code == "E002" for f in result.errors)
 
     def test_correct_feedrate_passes(self, tmp_path: Path) -> None:
-        gcode = MINIMAL_GCODE + "M620.1 E F299 T240\n"
+        gcode = _NON_BBL_GCODE + "M620.1 E F299 T240\n"
+        path = build_valid_3mf(tmp_path, gcode=gcode)
+        result = validate_3mf(path)
+        assert not any(f.code == "E002" for f in result.findings)
+
+    def test_bbl_orca_feedrate_not_flagged(self, tmp_path: Path) -> None:
+        # OrcaSlicer BBL G-code: F49.89 is correct for ABS at 2.0 mm³/s
+        gcode = MINIMAL_GCODE + "M620.1 E F49.8898 T240\n"
         path = build_valid_3mf(tmp_path, gcode=gcode)
         result = validate_3mf(path)
         assert not any(f.code == "E002" for f in result.findings)
