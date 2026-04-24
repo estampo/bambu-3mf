@@ -1,1 +1,0 @@
-Update cura.py comments to reflect that modern CuraEngine (5.x+) resolves variable placeholders; document remaining bambox post-processing responsibilities.

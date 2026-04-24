@@ -5,6 +5,17 @@ This changelog is managed by [towncrier](https://towncrier.readthedocs.io/).
 
 <!-- towncrier release notes start -->
 
+## 0.5.0 — 2026-04-24
+
+### Misc
+
+- Update cura.py comments to reflect that modern CuraEngine (5.x+) resolves variable placeholders; document remaining bambox post-processing responsibilities. ([#205](https://github.com/estampo/bambox/pull/205))
+- Add LICENSE file (MIT for bambox source); tighten THIRD-PARTY-NOTICES to explicitly state profile files remain under AGPL-3.0.
+- Extract cloud printing into a separate `boo-cloud` project; remove `bridge.py`, `credentials.py`, `auth.py` and all cloud CLI commands (`login`, `print`, `cancel`, `status`, `daemon`) from bambox.
+- Move cloud printing docs to boo-cloud; rewrite README, CLAUDE.md, ROADMAP.md, SECURITY.md to remove cloud/bridge references.
+- Remove bridge/ Rust source, build-bridge and publish-docker workflows, install scripts from bambox; bridge now lives in estampo/boo-cloud.
+
+
 ## 0.4.7 — 2026-04-24
 
 ### Bugfixes
