@@ -1,33 +1,37 @@
 Third-Party Notices
 ====================
 
-bambox is licensed under the MIT License (see pyproject.toml).
+bambox's own source code (src/bambox/*.py, tests/, .github/) is licensed
+under the MIT License. See LICENSE.
 
-This file documents third-party components whose intellectual property
-influenced bundled data files in this repository.
+This file documents third-party components whose intellectual property is
+present in bundled data files. Those files are NOT covered by the MIT
+License; they remain under their original licenses as specified below.
 
 
 1. CuraEngine — Printer Definition Format
 ------------------------------------------
 
+License: GNU Lesser General Public License v3.0 (LGPL-3.0)
+
 Files:
   src/bambox/data/cura/bambox_p1s_ams.def.json
   src/bambox/data/cura/bambox_p1s_ams_extruder_*.def.json
 
-The bundled CuraEngine printer definitions are original works written for
-bambox, but they use the CuraEngine definition schema (inheriting from
-"fdmprinter" and "fdmextruder" base definitions) and are intended to be
-loaded by CuraEngine at slice time.
-
-CuraEngine is developed by UltiMaker and licensed under the
-GNU Lesser General Public License v3.0 (LGPL-3.0).
+These printer definition files are original works written for bambox, but
+they use the CuraEngine definition schema (inheriting from the "fdmprinter"
+and "fdmextruder" base definitions) and are loaded by CuraEngine at slice
+time. Use of the schema constitutes a work that interfaces with LGPL-3.0
+software.
 
 Source: https://github.com/Ultimaker/CuraEngine
-License: https://github.com/Ultimaker/CuraEngine/blob/main/LICENSE
+License text: https://github.com/Ultimaker/CuraEngine/blob/main/LICENSE
 
 
-2. OrcaSlicer / BambuStudio — Profile Settings
------------------------------------------------
+2. OrcaSlicer / BambuStudio — Printer and Filament Profiles
+------------------------------------------------------------
+
+License: GNU Affero General Public License v3.0 (AGPL-3.0)
 
 Files:
   src/bambox/profiles/base_p1s.json
@@ -37,35 +41,33 @@ Files:
   src/bambox/profiles/_varying_keys.json
   src/bambox/profiles/_uniform_array_keys.json
 
-The profile JSON files contain printer and filament settings whose key names
-and default values are derived from OrcaSlicer and BambuStudio slicer
-profiles for Bambu Lab printers. These profiles encode the ~544 keys
-required by Bambu printer firmware in the project_settings.config archive
-entry.
+These files are derived from OrcaSlicer and BambuStudio printer/filament
+profiles for Bambu Lab hardware. They encode the ~544 keys required by
+Bambu printer firmware in the project_settings.config archive entry,
+including key names and default values taken from those profiles.
 
-OrcaSlicer is a fork of BambuStudio, itself a fork of PrusaSlicer/Slic3r.
+These files remain under AGPL-3.0. Redistribution must comply with
+AGPL-3.0, including making the complete corresponding source available.
+Because bambox is itself open-source, this requirement is satisfied by the
+public repository at https://github.com/estampo/bambox.
 
-OrcaSlicer is licensed under the GNU Affero General Public License v3.0
-(AGPL-3.0).
+OrcaSlicer is a fork of BambuStudio; BambuStudio is a fork of
+PrusaSlicer/Slic3r. The profile data referenced here was derived from
+AGPL-3.0-era releases of both projects.
 
-Source: https://github.com/SoftFever/OrcaSlicer
-License: https://github.com/SoftFever/OrcaSlicer/blob/main/LICENSE.txt
+OrcaSlicer source: https://github.com/SoftFever/OrcaSlicer
+OrcaSlicer license: https://github.com/SoftFever/OrcaSlicer/blob/main/LICENSE.txt
 
-BambuStudio was originally released under the GNU Affero General Public
-License v3.0 (AGPL-3.0). Bambu Lab subsequently changed the license for
-newer releases. The profile data referenced here was derived from
-AGPL-3.0-era releases.
-
-Source: https://github.com/bambulab/BambuStudio
-License (original): AGPL-3.0
+BambuStudio source (AGPL-3.0 era): https://github.com/bambulab/BambuStudio
+BambuStudio original license: AGPL-3.0
 
 
 3. Bambu Lab — Hardware Specifications
 --------------------------------------
 
 Printer dimensions, feed rates, acceleration limits, and other machine
-parameters in the above files reflect published specifications for Bambu Lab
-hardware (P1S). Factual hardware specifications are not copyrightable, but
-we acknowledge Bambu Lab as the source of these values.
+parameters in the profile files above reflect published specifications for
+Bambu Lab hardware (P1S). Factual hardware specifications are not
+copyrightable; we acknowledge Bambu Lab as the source of these values.
 
 Website: https://bambulab.com
