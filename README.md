@@ -287,8 +287,7 @@ uv run pytest
 
 The bundled machine and filament profiles under `src/bambox/profiles/` are
 derived from OrcaSlicer and BambuStudio slicer profiles (AGPL-3.0-era
-sources). The CuraEngine printer definitions under `src/bambox/data/cura/`
-use the CuraEngine schema (LGPL-3.0). See
+sources). See
 [`THIRD-PARTY-NOTICES`](THIRD-PARTY-NOTICES) for full provenance, file lists,
 and license details. The file is also shipped inside the installed package
 so it remains discoverable after `pip install`.

@@ -1,0 +1,1 @@
+Remove stale CuraEngine path from README and drop imprecise AGPLv3+ PyPI classifier (SPDX expression is AGPL-3.0-only).
