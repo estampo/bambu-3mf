@@ -295,4 +295,10 @@ so it remains discoverable after `pip install`.
 
 ## License
 
-MIT
+bambox's own source code is **MIT**. The bundled printer/filament profiles
+under `src/bambox/profiles/` are derived from BambuStudio 2.5.0.66
+(AGPL-3.0); they remain under AGPL-3.0. The package as a whole is therefore
+`MIT AND AGPL-3.0-only`.
+
+Full AGPL-3.0 text: [`LICENSES/AGPL-3.0.txt`](LICENSES/AGPL-3.0.txt).
+Third-party file list and provenance: [`THIRD-PARTY-NOTICES`](THIRD-PARTY-NOTICES).

@@ -7,13 +7,14 @@ packages = ["src/bambox"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "THIRD-PARTY-NOTICES" = "bambox/THIRD-PARTY-NOTICES"
+"LICENSES/AGPL-3.0.txt" = "bambox/LICENSES/AGPL-3.0.txt"
 
 [project]
 name = "bambox"
 version = "0.5.0"
 description = "Package plain G-code into Bambu Lab .gcode.3mf files"
 readme = "README.md"
-license = "MIT"
+license = "MIT AND AGPL-3.0-only"
 requires-python = ">=3.11"
 dependencies = [
     "typer>=0.12",
@@ -23,6 +24,7 @@ authors = [{ name = "estampo contributors" }]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "License :: OSI Approved :: MIT License",
+    "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
     "Programming Language :: Python :: 3",
     "Topic :: Printing",
 ]
